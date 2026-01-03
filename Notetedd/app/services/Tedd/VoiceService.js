@@ -1,9 +1,6 @@
 import * as Speech from 'expo-speech';
-import { 
-  usePermissions, 
-  requestPermissionsAsync,
-  getPermissionsAsync 
-} from 'expo-audio';
+import { Platform } from 'react-native';
+import { Audio } from 'expo-audio';
 
 class VoiceService {
   constructor() {
@@ -13,7 +10,9 @@ class VoiceService {
     this.currentUtterance = '';
     this.permissionGranted = false;
     this.permissionAsked = false;
-    this.continuousListening = false; // Track if we should auto-restart
+    this.continuousListening = false;
+    this.audioRecording = null;
+    this.isRecordingForSTT = false;
     
     // Voice settings with defaults
     this.settings = {
@@ -24,14 +23,23 @@ class VoiceService {
     };
   }
 
-  // Check if permissions are granted
+  // Check if permissions are granted (platform-specific)
   async checkPermissions() {
     try {
-      const { status } = await getPermissionsAsync();
-      this.permissionGranted = status === 'granted';
+      // For web, permissions are handled by browser
+      if (Platform.OS === 'web') {
+        // Check if Web Speech API is available
+        if (typeof window !== 'undefined' && 'webkitSpeechRecognition' in window) {
+          return 'granted'; // Browser will prompt when needed
+        }
+        return 'unavailable';
+      }
+      
+      // For native (iOS/Android), check expo-av audio permissions
+      const { status } = await Audio.getPermissionsAsync();
       return status;
     } catch (error) {
-      console.error('Error checking permissions:', error);
+      console.error('[VoiceService] Error checking permissions:', error);
       return 'undetermined';
     }
   }
@@ -39,52 +47,43 @@ class VoiceService {
   // Request microphone permissions (gracefully)
   async requestPermissions() {
     try {
-      // First check if already granted
-      const currentStatus = await this.checkPermissions();
-      
-      if (currentStatus === 'granted') {
-        this.permissionGranted = true;
-        return { granted: true, status: 'granted' };
-      }
-
-      // If already denied permanently, return without asking again
-      if (currentStatus === 'denied' && this.permissionAsked) {
+      // For web, browser handles permissions
+      if (Platform.OS === 'web') {
+        if (typeof window !== 'undefined' && 'webkitSpeechRecognition' in window) {
+          this.permissionGranted = true;
+          return { 
+            granted: true, 
+            status: 'granted',
+            message: 'Browser will handle microphone permissions'
+          };
+        }
+        
         return { 
           granted: false, 
-          status: 'denied',
-          message: 'Microphone permission was denied. Please enable it in your device settings.'
+          status: 'unavailable',
+          message: 'Speech recognition not available in this browser. Try Chrome or Edge.'
         };
       }
-
-      // Request permission
-      this.permissionAsked = true;
-      const { status, canAskAgain } = await requestPermissionsAsync();
+      
+      // For native platforms (iOS/Android), request permissions
+      const { status } = await Audio.requestPermissionsAsync();
       
       this.permissionGranted = status === 'granted';
-
-      if (status === 'granted') {
-        return { granted: true, status: 'granted' };
-      }
-
-      if (status === 'denied' && !canAskAgain) {
-        return { 
-          granted: false, 
-          status: 'denied',
-          message: 'Microphone permission denied. Please enable it in Settings > Notetedd > Microphone'
-        };
-      }
-
+      this.permissionAsked = true;
+      
       return { 
-        granted: false, 
-        status,
-        message: 'Microphone permission is required to use voice commands.'
+        granted: status === 'granted', 
+        status: status,
+        message: status === 'granted' 
+          ? 'Microphone access granted'
+          : 'Microphone access denied. Please enable it in your device settings.'
       };
     } catch (error) {
-      console.error('Error requesting permissions:', error);
+      console.error('[VoiceService] Error requesting permissions:', error);
       return { 
         granted: false, 
         status: 'error',
-        message: 'Failed to request microphone permission. Please try again.'
+        message: 'Failed to request microphone permission. Please enable it in your device settings.'
       };
     }
   }
@@ -92,23 +91,65 @@ class VoiceService {
   // Initialize audio (with graceful permission handling)
   async initializeAudio() {
     try {
-      // Check current permission status
-      const status = await this.checkPermissions();
+      console.log('[VoiceService] Initializing audio...');
       
-      if (status === 'granted') {
+      // Check platform and capabilities
+      if (Platform.OS === 'web') {
+        if (typeof window !== 'undefined' && 'webkitSpeechRecognition' in window) {
+          this.permissionGranted = true;
+          console.log('[VoiceService] Web Speech API available');
+          return { success: true, granted: true };
+        }
+        
+        console.log('[VoiceService] Web Speech API not available');
+        return { 
+          success: false, 
+          granted: false,
+          needsRequest: false,
+          message: 'Speech recognition not supported in this browser'
+        };
+      }
+      
+      // For native, set audio mode for recording
+      try {
+        await Audio.setAudioModeAsync({
+          allowsRecordingIOS: true,
+          playsInSilentModeIOS: true,
+          staysActiveInBackground: false,
+          shouldDuckAndroid: true,
+          playThroughEarpieceAndroid: false,
+        });
+        console.log('[VoiceService] Audio mode configured for native');
+      } catch (error) {
+        console.error('[VoiceService] Error setting audio mode:', error);
+      }
+      
+      // Check permissions
+      const permissionStatus = await this.checkPermissions();
+      
+      if (permissionStatus === 'granted') {
         this.permissionGranted = true;
-        console.log('[VoiceService] Microphone permission already granted');
+        console.log('[VoiceService] Permissions already granted');
         return { success: true, granted: true };
       }
-
-      // Don't throw error, just log and return status
-      console.log('[VoiceService] Microphone permission not yet granted, status:', status);
       
+      if (permissionStatus === 'undetermined') {
+        console.log('[VoiceService] Permissions need to be requested');
+        return { 
+          success: true, 
+          granted: false,
+          needsRequest: true,
+          message: 'Microphone permission needed for voice features'
+        };
+      }
+      
+      // Permissions denied
+      console.log('[VoiceService] Permissions denied');
       return { 
-        success: false, 
+        success: true, 
         granted: false,
-        needsRequest: true,
-        message: 'Microphone permission needed for voice features'
+        needsRequest: false,
+        message: 'Microphone access denied. You can still use text chat!'
       };
     } catch (error) {
       console.error('[VoiceService] Error initializing audio:', error);
@@ -131,35 +172,64 @@ class VoiceService {
 
       if (onStart) onStart();
 
-      await Speech.speak(text, {
-        language: this.settings.language,
-        pitch: this.settings.pitch,
-        rate: this.settings.rate,
-        voice: this.settings.voice,
-        onStart: () => {
-          this.isSpeaking = true;
-        },
-        onDone: () => {
-          this.isSpeaking = false;
-          this.currentUtterance = '';
-          if (onDone) onDone();
-        },
-        onStopped: () => {
-          this.isSpeaking = false;
-          this.currentUtterance = '';
-        },
-        onError: (error) => {
-          this.isSpeaking = false;
-          this.currentUtterance = '';
-          console.error('[VoiceService] Speech error:', error);
-          if (onError) onError(new Error(error));
-        },
-      });
+      // Platform-specific speech implementation
+      if (Platform.OS === 'web') {
+        // Web implementation
+        await Speech.speak(text, {
+          language: this.settings.language,
+          pitch: this.settings.pitch,
+          rate: this.settings.rate,
+          voice: this.settings.voice,
+          onStart: () => {
+            this.isSpeaking = true;
+          },
+          onDone: () => {
+            this.isSpeaking = false;
+            this.currentUtterance = '';
+            if (onDone) onDone();
+          },
+          onStopped: () => {
+            this.isSpeaking = false;
+            this.currentUtterance = '';
+          },
+          onError: (error) => {
+            this.isSpeaking = false;
+            this.currentUtterance = '';
+            console.error('[VoiceService] Speech error:', error);
+            if (onError) onError(new Error(error));
+          },
+        });
+      } else {
+        // Native implementation (iOS/Android)
+        await Speech.speak(text, {
+          language: this.settings.language,
+          pitch: this.settings.pitch,
+          rate: this.settings.rate,
+          voice: this.settings.voice,
+          onStart: () => {
+            this.isSpeaking = true;
+          },
+          onDone: () => {
+            this.isSpeaking = false;
+            this.currentUtterance = '';
+            if (onDone) onDone();
+          },
+          onStopped: () => {
+            this.isSpeaking = false;
+            this.currentUtterance = '';
+          },
+          onError: (error) => {
+            this.isSpeaking = false;
+            this.currentUtterance = '';
+            console.error('[VoiceService] Speech error:', error);
+            if (onError) onError(new Error(error));
+          },
+        });
+      }
     } catch (error) {
       this.isSpeaking = false;
       console.error('[VoiceService] Speak error:', error);
       if (onError) onError(error);
-      // Don't throw, just log and callback
     }
   }
 
@@ -184,18 +254,8 @@ class VoiceService {
   // Speech-to-Text: Listen to user (requires microphone permission)
   async startListening(onResult, onError, continuous = false) {
     try {
-      // Check if permission is granted
-      if (!this.permissionGranted) {
-        const permResult = await this.requestPermissions();
-        
-        if (!permResult.granted) {
-          const error = new Error(permResult.message || 'Microphone permission denied');
-          error.permissionDenied = true;
-          if (onError) onError(error);
-          return;
-        }
-      }
-
+      console.log('[VoiceService] Starting to listen...');
+      
       // Store continuous listening flag
       this.continuousListening = continuous;
 
@@ -204,96 +264,159 @@ class VoiceService {
         await this.stopSpeaking();
       }
 
-      // Web Speech API (for Expo Web and supported browsers)
-      if (typeof window !== 'undefined' && 'webkitSpeechRecognition' in window) {
-        const SpeechRecognition = window.webkitSpeechRecognition;
-        this.recognitionInstance = new SpeechRecognition();
-        
-        this.recognitionInstance.continuous = true;
-        this.recognitionInstance.interimResults = true;
-        this.recognitionInstance.lang = this.settings.language;
-
-        this.recognitionInstance.onresult = (event) => {
-          const results = event.results;
-          const lastResult = results[results.length - 1];
-          const transcript = lastResult[0].transcript;
-          const confidence = lastResult[0].confidence;
-          const isFinal = lastResult.isFinal;
-
-          onResult({
-            transcript,
-            confidence,
-            isFinal,
-          });
-        };
-
-        this.recognitionInstance.onerror = (event) => {
-          console.log('[VoiceService] Speech recognition event:', event.error);
-          this.isListening = false;
-          
-          // Handle specific errors gracefully
-          let shouldNotifyUser = true;
-          let errorMessage = 'Speech recognition error';
-          
-          if (event.error === 'not-allowed') {
-            errorMessage = 'Microphone access was denied. Please enable it in your browser settings.';
-          } else if (event.error === 'no-speech') {
-            // No speech detected - this is common, just log it and retry
-            console.log('[VoiceService] No speech detected - this is normal');
-            shouldNotifyUser = false; // Don't show error to user
-            // Optionally auto-restart listening
-            setTimeout(() => {
-              if (this.continuousListening && !this.isListening) {
-                console.log('[VoiceService] Auto-restarting speech recognition...');
-                this.startListening(onResult, onError).catch(console.error);
-              }
-            }, 500);
-          } else if (event.error === 'audio-capture') {
-            errorMessage = 'Microphone not detected. Please check your microphone connection.';
-          } else if (event.error === 'network') {
-            errorMessage = 'Network error. Please check your connection.';
-          } else if (event.error === 'aborted') {
-            // User manually stopped - don't show error
-            console.log('[VoiceService] Speech recognition aborted by user');
-            shouldNotifyUser = false;
-          }
-          
-          // Only call error callback for important errors
-          if (shouldNotifyUser && onError) {
-            onError(new Error(errorMessage));
-          }
-        };
-
-        this.recognitionInstance.onend = () => {
-          this.isListening = false;
-          console.log('[VoiceService] Speech recognition ended');
-        };
-
-        this.recognitionInstance.start();
-        this.isListening = true;
-        console.log('[VoiceService] Speech recognition started');
+      // Platform-specific implementation
+      if (Platform.OS === 'web') {
+        await this.startWebSpeechRecognition(onResult, onError, continuous);
       } else {
-        // For native (iOS/Android), Web Speech API not available
-        throw new Error('Speech recognition not available on this platform. Please use text input instead.');
+        await this.startNativeSpeechRecognition(onResult, onError, continuous);
       }
     } catch (error) {
       this.isListening = false;
       console.error('[VoiceService] Error starting listening:', error);
-      if (onError) onError(error);
-      // Don't throw, just callback with error
+      
+      // Create user-friendly error
+      const friendlyError = new Error(
+        'Could not start voice recognition. Please check your microphone and permissions.'
+      );
+      
+      if (onError) {
+        onError(friendlyError);
+      }
     }
+  }
+
+  // Web Speech Recognition (Chrome/Edge)
+  async startWebSpeechRecognition(onResult, onError, continuous) {
+    // Check if Web Speech API is available
+    if (typeof window === 'undefined' || !('webkitSpeechRecognition' in window)) {
+      const error = new Error(
+        'Speech recognition not supported. Please use Chrome or Edge browser.'
+      );
+      error.unavailable = true;
+      if (onError) onError(error);
+      return;
+    }
+
+    // Create speech recognition instance
+    const SpeechRecognition = window.webkitSpeechRecognition;
+    this.recognitionInstance = new SpeechRecognition();
+    
+    this.recognitionInstance.continuous = continuous;
+    this.recognitionInstance.interimResults = true;
+    this.recognitionInstance.lang = this.settings.language;
+    this.recognitionInstance.maxAlternatives = 1;
+
+    // Handle results
+    this.recognitionInstance.onresult = (event) => {
+      try {
+        const results = event.results;
+        const lastResult = results[results.length - 1];
+        const transcript = lastResult[0].transcript;
+        const confidence = lastResult[0].confidence || 0.9;
+        const isFinal = lastResult.isFinal;
+
+        onResult({
+          transcript,
+          confidence,
+          isFinal,
+        });
+      } catch (err) {
+        console.error('[VoiceService] Error processing result:', err);
+      }
+    };
+
+    // Handle errors
+    this.recognitionInstance.onerror = (event) => {
+      console.log('[VoiceService] Speech recognition error:', event.error);
+      this.isListening = false;
+      
+      let shouldNotifyUser = true;
+      let errorMessage = 'Speech recognition error';
+      
+      if (event.error === 'not-allowed' || event.error === 'permission-denied') {
+        errorMessage = 'Microphone access denied. Please enable it in your browser settings.';
+      } else if (event.error === 'no-speech') {
+        console.log('[VoiceService] No speech detected - normal behavior');
+        shouldNotifyUser = false;
+        
+        if (this.continuousListening && !this.isListening) {
+          setTimeout(() => {
+            this.startWebSpeechRecognition(onResult, onError, continuous).catch(console.error);
+          }, 500);
+        }
+      } else if (event.error === 'audio-capture') {
+        errorMessage = 'Microphone not detected. Please check your microphone connection.';
+      } else if (event.error === 'network') {
+        errorMessage = 'Network error. Please check your connection.';
+      } else if (event.error === 'aborted') {
+        console.log('[VoiceService] Speech recognition aborted');
+        shouldNotifyUser = false;
+      }
+      
+      if (shouldNotifyUser && onError) {
+        onError(new Error(errorMessage));
+      }
+    };
+
+    // Handle end of recognition
+    this.recognitionInstance.onend = () => {
+      this.isListening = false;
+      console.log('[VoiceService] Speech recognition ended');
+      
+      if (this.continuousListening) {
+        setTimeout(() => {
+          if (this.continuousListening && !this.isListening) {
+            this.startWebSpeechRecognition(onResult, onError, continuous).catch(console.error);
+          }
+        }, 500);
+      }
+    };
+
+    // Start recognition
+    this.recognitionInstance.start();
+    this.isListening = true;
+    console.log('[VoiceService] Web speech recognition started');
+  }
+
+  // Native Speech Recognition (iOS/Android) - Note: This requires additional setup
+  async startNativeSpeechRecognition(onResult, onError, continuous) {
+    // For native platforms, we need to use expo-speech-recognition or similar
+    // Since expo-speech-recognition doesn't exist in Expo SDK 54,
+    // we'll provide a fallback message
+    
+    const error = new Error(
+      'Voice input is only available on web (Chrome/Edge). Please use text input on mobile.'
+    );
+    error.unavailable = true;
+    error.platform = 'native';
+    
+    if (onError) {
+      onError(error);
+    }
+    
+    // Note: For production, you would integrate with:
+    // - expo-speech-recognition (if available)
+    // - react-native-voice
+    // - or a custom native module
   }
 
   // Stop listening
   async stopListening() {
     try {
-      this.continuousListening = false; // Stop auto-restart
+      this.continuousListening = false;
       
       if (this.recognitionInstance) {
         this.recognitionInstance.stop();
         this.recognitionInstance = null;
       }
+      
+      if (this.audioRecording) {
+        await this.audioRecording.stopAndUnloadAsync();
+        this.audioRecording = null;
+      }
+      
       this.isListening = false;
+      this.isRecordingForSTT = false;
       console.log('[VoiceService] Stopped listening');
     } catch (error) {
       console.error('[VoiceService] Error stopping listening:', error);
@@ -332,10 +455,19 @@ class VoiceService {
     return this.permissionGranted;
   }
 
+  // Check if platform supports speech recognition
+  isSpeechRecognitionAvailable() {
+    if (Platform.OS === 'web') {
+      return typeof window !== 'undefined' && 'webkitSpeechRecognition' in window;
+    }
+    // Native speech recognition requires additional setup
+    return false;
+  }
+
   // Detect wake word in transcript
   detectWakeWord(transcript) {
     const lowerTranscript = transcript.toLowerCase().trim();
-    const wakeWords = ['hey tedd', 'hi tedd', 'tedd'];
+    const wakeWords = ['hey tedd', 'hi tedd', 'hey ted', 'hi ted', 'tedd', 'ted'];
     
     return wakeWords.some(word => 
       lowerTranscript.includes(word) || 
@@ -346,7 +478,7 @@ class VoiceService {
   // Extract command after wake word
   extractCommand(transcript) {
     const lowerTranscript = transcript.toLowerCase().trim();
-    const wakeWords = ['hey tedd', 'hi tedd', 'tedd'];
+    const wakeWords = ['hey tedd', 'hi tedd', 'hey ted', 'hi ted', 'tedd', 'ted'];
     
     for (const wakeWord of wakeWords) {
       if (lowerTranscript.startsWith(wakeWord)) {

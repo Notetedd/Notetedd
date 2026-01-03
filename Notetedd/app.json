@@ -4,7 +4,7 @@
     "slug": "Notetedd",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/images/icon.png",
+    "icon": "./public/icon.png",
     "scheme": "notetedd",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
@@ -63,6 +63,9 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
+    },
+     "extra": {
+      "geminiApiKey": "AIzaSyCZVQqMteS8jSA_cAYOUS0XxzwHxzgIaNI"
     }
   }
 }

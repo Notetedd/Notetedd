@@ -9,13 +9,14 @@ import {
   Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import VoiceService from './VoiceService';
+import VoiceService from '../../app/services/Tedd/VoiceService';
 
 const TeddPermissionPrompt = ({ 
   visible, 
   onClose, 
   onPermissionGranted,
-  onPermissionDenied 
+  onPermissionDenied,
+  platform = Platform.OS,
 }) => {
   const [permissionStatus, setPermissionStatus] = useState('undetermined');
   const [isRequesting, setIsRequesting] = useState(false);
@@ -27,22 +28,31 @@ const TeddPermissionPrompt = ({
   }, [visible]);
 
   const checkPermissionStatus = async () => {
-    const status = await VoiceService.checkPermissions();
-    setPermissionStatus(status);
+    try {
+      const status = await VoiceService.checkPermissions();
+      setPermissionStatus(status);
+      console.log('[TeddPermissionPrompt] Permission status:', status);
+    } catch (error) {
+      console.error('[TeddPermissionPrompt] Error checking permissions:', error);
+      setPermissionStatus('undetermined');
+    }
   };
 
   const handleRequestPermission = async () => {
     setIsRequesting(true);
     
     try {
+      console.log('[TeddPermissionPrompt] Requesting permission...');
       const result = await VoiceService.requestPermissions();
+      
+      console.log('[TeddPermissionPrompt] Permission result:', result);
       
       if (result.granted) {
         setPermissionStatus('granted');
         if (onPermissionGranted) {
           onPermissionGranted();
         }
-        // Auto close after success
+        // Auto close after success with delay for user to see success message
         setTimeout(() => {
           onClose();
         }, 1500);
@@ -53,7 +63,8 @@ const TeddPermissionPrompt = ({
         }
       }
     } catch (error) {
-      console.error('Error requesting permission:', error);
+      console.error('[TeddPermissionPrompt] Error requesting permission:', error);
+      setPermissionStatus('error');
     } finally {
       setIsRequesting(false);
     }
@@ -66,7 +77,39 @@ const TeddPermissionPrompt = ({
       Linking.openSettings();
     } else {
       // For web, show instructions
-      alert('Please enable microphone access in your browser settings:\n\n1. Click the lock/info icon in the address bar\n2. Find "Microphone" settings\n3. Set to "Allow"');
+      alert(
+        'Please enable microphone access in your browser settings:\n\n' +
+        '1. Click the lock/info icon in the address bar\n' +
+        '2. Find "Microphone" settings\n' +
+        '3. Set to "Allow"\n' +
+        '4. Refresh the page'
+      );
+    }
+  };
+
+  const getPlatformInstructions = () => {
+    switch (platform) {
+      case 'web':
+        return 'Your browser will ask for microphone access. Click "Allow" to enable voice features.';
+      case 'ios':
+        return 'Tedd needs microphone access to listen to your voice commands. You can change this later in Settings.';
+      case 'android':
+        return 'Tedd needs microphone access to listen to your voice commands. You can change this later in Settings.';
+      default:
+        return 'Tedd needs microphone access to enable voice features.';
+    }
+  };
+
+  const getPlatformIcon = () => {
+    switch (platform) {
+      case 'web':
+        return 'globe-outline';
+      case 'ios':
+        return 'logo-apple';
+      case 'android':
+        return 'logo-android';
+      default:
+        return 'phone-portrait-outline';
     }
   };
 
@@ -81,6 +124,9 @@ const TeddPermissionPrompt = ({
           <Text style={styles.description}>
             You can now use voice commands with Tedd.
           </Text>
+          <Text style={styles.successNote}>
+            Say "Hey Tedd" to start a conversation!
+          </Text>
         </>
       );
     }
@@ -93,7 +139,8 @@ const TeddPermissionPrompt = ({
           </View>
           <Text style={styles.title}>Permission Denied</Text>
           <Text style={styles.description}>
-            To use voice commands, please enable microphone access in your {Platform.OS === 'web' ? 'browser' : 'device'} settings.
+            To use voice commands, please enable microphone access in your{' '}
+            {platform === 'web' ? 'browser' : 'device'} settings.
           </Text>
           
           <TouchableOpacity
@@ -105,8 +152,33 @@ const TeddPermissionPrompt = ({
           </TouchableOpacity>
 
           <Text style={styles.alternativeText}>
-            You can still use Tedd with text input!
+            💬 You can still use Tedd with text input!
           </Text>
+        </>
+      );
+    }
+
+    if (permissionStatus === 'unavailable') {
+      return (
+        <>
+          <View style={styles.iconContainer}>
+            <Ionicons name="information-circle" size={64} color="#2196F3" />
+          </View>
+          <Text style={styles.title}>Voice Not Available</Text>
+          <Text style={styles.description}>
+            {platform === 'web'
+              ? 'Voice features require Chrome or Edge browser.'
+              : 'Voice features are not available on this device.'}
+          </Text>
+          <Text style={styles.alternativeText}>
+            💬 You can use Tedd with text input instead!
+          </Text>
+          <TouchableOpacity
+            style={styles.button}
+            onPress={onClose}
+          >
+            <Text style={styles.buttonText}>Continue with Text</Text>
+          </TouchableOpacity>
         </>
       );
     }
@@ -119,7 +191,7 @@ const TeddPermissionPrompt = ({
         </View>
         <Text style={styles.title}>Enable Voice Commands</Text>
         <Text style={styles.description}>
-          Tedd needs microphone access to hear your voice commands. You'll be able to:
+          {getPlatformInstructions()}
         </Text>
         
         <View style={styles.featuresList}>
@@ -137,6 +209,14 @@ const TeddPermissionPrompt = ({
           </View>
         </View>
 
+        {/* Platform indicator */}
+        <View style={styles.platformIndicator}>
+          <Ionicons name={getPlatformIcon()} size={16} color="#999" />
+          <Text style={styles.platformText}>
+            {platform === 'web' ? 'Web Browser' : platform === 'ios' ? 'iOS' : 'Android'}
+          </Text>
+        </View>
+
         <TouchableOpacity
           style={[styles.button, isRequesting && styles.buttonDisabled]}
           onPress={handleRequestPermission}
@@ -152,7 +232,7 @@ const TeddPermissionPrompt = ({
           style={styles.skipButton}
           onPress={onClose}
         >
-          <Text style={styles.skipButtonText}>Skip for Now</Text>
+          <Text style={styles.skipButtonText}>Use Text Mode Instead</Text>
         </TouchableOpacity>
 
         <Text style={styles.privacyNote}>
@@ -227,7 +307,7 @@ const styles = StyleSheet.create({
   },
   featuresList: {
     width: '100%',
-    marginBottom: 24,
+    marginBottom: 16,
   },
   featureItem: {
     flexDirection: 'row',
@@ -239,6 +319,21 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: '#333',
     marginLeft: 12,
+  },
+  platformIndicator: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 16,
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    backgroundColor: '#f5f5f5',
+    borderRadius: 12,
+  },
+  platformText: {
+    fontSize: 12,
+    color: '#999',
+    marginLeft: 6,
+    fontWeight: '500',
   },
   button: {
     backgroundColor: '#6200EE',
@@ -285,8 +380,16 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#4CAF50',
     marginTop: 8,
+    marginBottom: 12,
     textAlign: 'center',
     fontWeight: '500',
+  },
+  successNote: {
+    fontSize: 15,
+    color: '#4CAF50',
+    marginTop: 8,
+    textAlign: 'center',
+    fontWeight: '600',
   },
   privacyNote: {
     fontSize: 12,
