@@ -1,0 +1,17 @@
+{
+  "extends": "expo/tsconfig.base",
+  "compilerOptions": {
+    "strict": true,
+    "paths": {
+      "@/*": [
+        "./*"
+      ]
+    }
+  },
+  "include": [
+    "**/*.ts",
+    "**/*.tsx",
+    ".expo/types/**/*.ts",
+    "expo-env.d.ts"
+, "app/services/Tedd/VoiceService.js", "app/services/Tedd/TeddManager.js", "app/services/Tedd/TeddFirebaseService.js", "app/services/Tedd/GeminiService.js"  ]
+}

@@ -1,0 +1,68 @@
+{
+  "expo": {
+    "name": "Notetedd",
+    "slug": "Notetedd",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/images/icon.png",
+    "scheme": "notetedd",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    
+
+    "ios": {
+      "infoPlist": {
+        "NSMicrophoneUsageDescription": "Notetedd needs microphone access to enable voice commands with Tedd, your AI study assistant.",
+        "NSSpeechRecognitionUsageDescription": "Notetedd uses speech recognition to understand your voice commands.",
+        "supportsTablet": true
+      },
+      "bundleIdentifier": "com.notetedd.app"
+      
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#E6F4FE",
+        "foregroundImage": "./public/icon-512.png",
+        "backgroundImage": "./public/icon-512.png",
+        "monochromeImage": "./public/icon-512.png"
+      },
+      "edgeToEdgeEnabled": true,
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "output": "static",
+      "favicon": "./public/icon.png",
+      "permissions":["camera", "bluetooth"]
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./public/icon.png",
+          "imageWidth": 200,
+          "width": 1024,
+          "height": 800,
+          "resizeMode": "contain",
+          "backgroundColor": "#ffffff",
+          "startUrl": "/",
+          "scope": "/"
+        }
+      ],
+      "expo-barcode-scanner",
+      [
+        "expo-audio",
+      
+        {
+          "microphonePermission": "Allow $(PRODUCT_NAME) to access your microphone."
+        }
+      ],
+      "expo-image-picker",
+      "expo-video"
+    ],
+    "experiments": {
+      "typedRoutes": true,
+      "reactCompiler": true
+    }
+  }
+}
