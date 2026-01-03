@@ -12,7 +12,7 @@ import {
   Alert,
   Platform,
 } from "react-native";
-import { getAuth, onAuthStateChanged, signOut ,User} from "firebase/auth";
+import { getAuth, onAuthStateChanged, signOut, User } from "firebase/auth";
 import { getFirestore, doc, getDoc } from "firebase/firestore";
 import { LinearGradient } from "expo-linear-gradient";
 import MaterialIcons from "react-native-vector-icons/MaterialIcons";
@@ -200,32 +200,32 @@ export default function Sidebar({ isOpen, onClose, navigation }: SidebarProps) {
   const menuSections = [
     {
       items: [
-      { icon: "person", label: "My Profile", screen: "ProfileScreen" },
-      { icon: "star", label: "Subscription", screen: "SubscriptionPlanScreen", badge: isPremium ? "PRO" : null },
-      { icon: "credit-card", label: "Payment Methods", screen: "PaymentMethodsScreen" },
-    ],
+        { icon: "person", label: "My Profile", screen: "ProfileScreen" },
+        { icon: "star", label: "Subscription", screen: "SubscriptionPlanScreen", badge: isPremium ? "PRO" : null },
+        { icon: "credit-card", label: "Payment Methods", screen: "PaymentMethodsScreen" },
+      ],
     },
     {
       title: "Content",
       items: [
         { icon: "school", label: "Sync Classroom Notes", screen: "SyncClassroomScreen", badge: null },
-        { icon: "file-up", label: "Upload File", screen: "UploadPDFScreen", badge: null },
-        { icon: "dollar-sign", label: "Sell Notes", screen: "SellNotesScreen", badge: null },
+        { icon: "upload-file", label: "Upload File", screen: "UploadPDFScreen", badge: null },
+        { icon: "attach-money", label: "Sell Notes", screen: "SellNotesScreen", badge: null },
       ],
     },
     {
       title: "Settings",
       items: [
-        { icon: "laptop2", label: "Paired Devices", screen: "PairedDevicesScreen", badge: "2" },
-        { icon: "bell", label: "Notifications", screen: "NotificationsScreen", badge: null },
-        { icon: isDark ? "sun" : "moon", label: "Dark Mode", screen: "", badge: null, toggle: true, isTheme: true },
-        { icon: "shield", label: "Privacy", screen: "PrivacyScreen", badge: null },
+        { icon: "devices", label: "Paired Devices", screen: "PairedDevicesScreen", badge: "2" },
+        { icon: "notifications", label: "Notifications", screen: "NotificationsScreen", badge: null },
+        { icon: isDark ? "light-mode" : "dark-mode", label: "Dark Mode", screen: "", badge: null, toggle: true, isTheme: true },
+        { icon: "privacy-tip", label: "Privacy", screen: "PrivacyScreen", badge: null },
       ],
     },
     {
       title: "Support",
       items: [
-        { icon: "help-circle", label: "Help & Support", screen: "HelpSupportScreen", badge: null },
+        { icon: "help", label: "Help & Support", screen: "HelpSupportScreen", badge: null },
       ],
     },
   ];
@@ -320,9 +320,9 @@ export default function Sidebar({ isOpen, onClose, navigation }: SidebarProps) {
           showsVerticalScrollIndicator={false}
           contentContainerStyle={styles.menuScrollContent}
         >
-          {menuSections.map((section) => (
+          {menuSections.map((section, sectionIndex) => (
             <Animated.View 
-              key={section.title}
+              key={section.title || `section-${sectionIndex}`}
               style={[
                 styles.menuSection,
                 { 
@@ -336,20 +336,19 @@ export default function Sidebar({ isOpen, onClose, navigation }: SidebarProps) {
                 },
               ]}
             >
-              <Text style={[styles.sectionTitle, { color: colors.subtext }]}>
-                {section.title}
-              </Text>
+              {section.title && (
+                <Text style={[styles.sectionTitle, { color: colors.subtext }]}>
+                  {section.title}
+                </Text>
+              )}
               
-              {section.items.map((item) => (
-                <Fragment key={item.label}>
+              {section.items.map((item, itemIndex) => (
+                <Fragment key={`${item.label}-${itemIndex}`}>
                   {item.toggle ? (
                     <View style={[styles.menuItem, { backgroundColor: colors.card }]}>
                       <View style={styles.menuItemLeft}>
                         <View style={[styles.iconContainer, { backgroundColor: isDark ? '#374151' : '#FFFFFF' }]}>
-                          <item.icon 
-                            size={20} 
-                            color={colors.subtext} 
-                          />
+                          <MaterialIcons name={item.icon} size={20} color={colors.subtext} />
                         </View>
                         <Text style={[styles.menuItemText, { color: colors.text }]}>
                           {item.label}
@@ -373,7 +372,8 @@ export default function Sidebar({ isOpen, onClose, navigation }: SidebarProps) {
                     >
                       <View style={styles.menuItemLeft}>
                         <View style={[styles.iconContainer, { backgroundColor: isDark ? '#374151' : '#FFFFFF' }]}>
-                          <item.icon 
+                          <MaterialIcons 
+                            name={item.icon} 
                             size={20} 
                             color={colors.subtext} 
                           />
@@ -392,7 +392,7 @@ export default function Sidebar({ isOpen, onClose, navigation }: SidebarProps) {
                             <Text style={styles.badgeText}>{item.badge}</Text>
                           </View>
                         )}
-                        <MaterialIcons name="chevron-right" size={20} color="rgba(255,255,255,0.6)" />
+                        <MaterialIcons name="chevron-right" size={20} color={colors.subtext} />
                       </View>
                     </TouchableOpacity>
                   )}

@@ -1,6 +1,7 @@
 import VoiceService from './VoiceService';
 import GeminiService from './GeminiService';
 import TeddFirebaseService from './TeddFirebaseService';
+import { Platform } from 'react-native';
 
 class TeddManager {
   constructor(config) {
@@ -12,7 +13,7 @@ class TeddManager {
     
     this.geminiService = new GeminiService({
       apiKey: config.geminiApiKey,
-      model: 'gemini-pro',
+      model: 'gemini-2.0-flash',
       temperature: 0.7,
     });
 
@@ -23,17 +24,41 @@ class TeddManager {
     this.wakeWordEnabled = true;
     this.continuousListening = false;
     this.interimTranscript = '';
+    this.conversationMode = 'text'; // 'text' or 'speech'
+    this.speechAvailable = false;
   }
 
   // Initialize Tedd
   async initialize() {
     try {
+      console.log('[TeddManager] Initializing...');
+      
+      // Check if speech recognition is available
+      this.speechAvailable = VoiceService.isSpeechRecognitionAvailable();
+      console.log('[TeddManager] Speech available:', this.speechAvailable);
+      
       // Initialize audio (will check permissions but not crash if denied)
       const audioInit = await VoiceService.initializeAudio();
       
       if (!audioInit.success) {
         console.log('[TeddManager] Audio not initialized:', audioInit.message);
         // Don't throw error, just log - user can still use text input
+        if (this.onError) {
+          const error = new Error('Voice features unavailable. You can still use text chat!');
+          error.severity = 'info';
+          error.canDismiss = true;
+          this.onError(error);
+        }
+      } else if (audioInit.needsRequest) {
+        console.log('[TeddManager] Permissions need to be requested');
+        // Inform user they can enable voice features
+        if (this.onError) {
+          const error = new Error('Enable microphone to use voice features, or continue with text chat.');
+          error.severity = 'info';
+          error.canDismiss = true;
+          error.needsPermission = true;
+          this.onError(error);
+        }
       }
       
       // Load user preferences
@@ -46,7 +71,7 @@ class TeddManager {
             rate: preferences.speechRate,
             voice: preferences.selectedVoice,
           });
-          this.wakeWordEnabled = preferences.wakeWordEnabled;
+          this.wakeWordEnabled = preferences.wakeWordEnabled !== false;
         }
       } catch (error) {
         console.error('[TeddManager] Error loading preferences:', error);
@@ -67,22 +92,118 @@ class TeddManager {
         }
       } catch (error) {
         console.error('[TeddManager] Error loading conversation history:', error);
-        // Continue initialization even if history fails
       }
       
       this.isInitialized = true;
       this.setState('idle');
       console.log('[TeddManager] Initialized successfully');
+      
+      return {
+        success: true,
+        speechAvailable: this.speechAvailable,
+        hasPermission: audioInit.granted,
+        needsPermission: audioInit.needsRequest,
+      };
     } catch (error) {
       console.error('[TeddManager] Error initializing Tedd:', error);
       // Set as initialized anyway - text features still work
       this.isInitialized = true;
       this.setState('idle');
       
-      // Call error handler but don't throw
-      if (this.onError) {
-        this.onError(new Error('Tedd initialized with limited features. Voice may not be available.'));
+      return {
+        success: false,
+        speechAvailable: false,
+        error: error.message,
+      };
+    }
+  }
+
+  // Request microphone permissions (for manual permission request)
+  async requestMicrophonePermission() {
+    try {
+      const result = await VoiceService.requestPermissions();
+      
+      if (result.granted) {
+        console.log('[TeddManager] Microphone permission granted');
+        this.speechAvailable = VoiceService.isSpeechRecognitionAvailable();
+        
+        // Notify success
+        if (this.onError) {
+          const success = new Error('Microphone enabled! You can now use voice features.');
+          success.severity = 'success';
+          success.canDismiss = true;
+          this.onError(success);
+        }
+        
+        return { success: true, granted: true };
+      } else {
+        console.log('[TeddManager] Microphone permission denied');
+        
+        if (this.onError) {
+          const error = new Error(result.message || 'Microphone access denied. You can still use text chat.');
+          error.severity = 'warning';
+          error.canDismiss = true;
+          this.onError(error);
+        }
+        
+        return { success: false, granted: false, message: result.message };
       }
+    } catch (error) {
+      console.error('[TeddManager] Error requesting permission:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  // Switch conversation mode
+  setConversationMode(mode) {
+    console.log('[TeddManager] Switching to mode:', mode);
+    this.conversationMode = mode;
+    
+    if (mode === 'speech') {
+      // Check if speech is available
+      if (!this.speechAvailable) {
+        console.log('[TeddManager] Speech not available on this platform');
+        
+        if (this.onError) {
+          const error = new Error(
+            Platform.OS === 'web' 
+              ? 'Voice mode requires Chrome or Edge browser. Staying in text mode.'
+              : 'Voice mode not available on this device. Staying in text mode.'
+          );
+          error.severity = 'info';
+          error.canDismiss = true;
+          this.onError(error);
+        }
+        
+        this.conversationMode = 'text';
+        return false;
+      }
+      
+      // Check permissions
+      if (!VoiceService.hasPermission()) {
+        console.log('[TeddManager] No microphone permission');
+        
+        if (this.onError) {
+          const error = new Error('Please enable microphone access to use voice mode.');
+          error.severity = 'warning';
+          error.canDismiss = true;
+          error.needsPermission = true;
+          this.onError(error);
+        }
+        
+        return false;
+      }
+      
+      // Start wake word detection if enabled
+      if (this.wakeWordEnabled) {
+        this.startWakeWordDetection();
+      }
+      
+      return true;
+    } else {
+      // Switch to text mode
+      this.stopWakeWordDetection();
+      return true;
     }
   }
 
@@ -92,9 +213,31 @@ class TeddManager {
       throw new Error('Tedd not initialized');
     }
     
+    // Check if speech recognition is available
+    if (!this.speechAvailable) {
+      console.log('[TeddManager] Speech recognition not available');
+      this.setState('idle');
+      return;
+    }
+    
+    // Check permissions
+    if (!VoiceService.hasPermission()) {
+      console.log('[TeddManager] No microphone permission for wake word detection');
+      this.setState('idle');
+      return;
+    }
+    
     this.continuousListening = true;
     this.setState('wake-word-detection');
-    await this.startListeningForWakeWord();
+    
+    try {
+      await this.startListeningForWakeWord();
+    } catch (error) {
+      console.error('[TeddManager] Could not start wake word detection:', error);
+      // Fall back to idle state
+      this.setState('idle');
+      this.continuousListening = false;
+    }
   }
 
   // Stop wake word detection
@@ -109,8 +252,8 @@ class TeddManager {
     try {
       await VoiceService.startListening(
         this.handleWakeWordResult.bind(this),
-        this.handleError.bind(this),
-        true // continuous mode - auto-restart on no-speech
+        this.handleWakeWordError.bind(this),
+        true // continuous mode
       );
     } catch (error) {
       this.handleError(error);
@@ -127,15 +270,21 @@ class TeddManager {
       return;
     }
     
+    console.log('[TeddManager] Wake word check:', transcript);
+    
     // Check for wake word in final transcript
     if (VoiceService.detectWakeWord(transcript)) {
+      console.log('[TeddManager] Wake word detected!');
+      
       const command = VoiceService.extractCommand(transcript);
       
       if (command && command.length > 0) {
         // User said wake word + command in one go
-        this.handleUserInput(command);
+        console.log('[TeddManager] Command with wake word:', command);
+        this.handleUserInput(command, 'speech');
       } else {
-        // Just wake word, start listening for command
+        // Just wake word, acknowledge and start listening for command
+        console.log('[TeddManager] Wake word only, starting active listening');
         this.startActiveListening();
       }
     }
@@ -144,31 +293,54 @@ class TeddManager {
     this.interimTranscript = '';
   }
 
+  // Handle wake word detection errors (separate from general errors)
+  handleWakeWordError(error) {
+    console.log('[TeddManager] Wake word detection error:', error.message);
+    
+    // Don't show errors for no-speech or aborted during wake word detection
+    // These are expected during continuous listening
+    if (error.message?.includes('No speech') || 
+        error.message?.includes('aborted') ||
+        error.message?.includes('no-speech')) {
+      return;
+    }
+    
+    // For permission errors, handle specially
+    if (error.message?.includes('denied') || error.message?.includes('not-allowed')) {
+      this.setState('idle');
+      
+      if (this.onError) {
+        const permError = new Error('Microphone access denied. Switching to text mode.');
+        permError.severity = 'warning';
+        permError.canDismiss = true;
+        this.onError(permError);
+      }
+      
+      this.conversationMode = 'text';
+      return;
+    }
+    
+    // For other errors, just log and continue
+    console.error('[TeddManager] Wake word error:', error);
+  }
+
   // Start active listening (after wake word or manual activation)
   async startActiveListening() {
     try {
-      // Check if we have microphone permission
-      if (!VoiceService.hasPermission()) {
-        console.log('[TeddManager] Requesting microphone permission...');
-        const permResult = await VoiceService.requestPermissions();
+      // Check if speech recognition is available
+      if (!this.speechAvailable) {
+        console.log('[TeddManager] Speech recognition not available');
+        this.setState('idle');
         
-        if (!permResult.granted) {
-          // Permission denied - inform user but don't crash
-          this.setState('idle');
-          
-          if (this.onError) {
-            const error = new Error(permResult.message || 'Microphone permission needed for voice commands');
-            error.permissionDenied = true;
-            this.onError(error);
-          }
-          
-          // Speak the message if TTS is available
-          await VoiceService.speak(
-            "I need microphone permission to hear you. You can still type your messages!"
-          );
-          
-          return;
+        if (this.onError) {
+          const error = new Error('Voice input not available. Please use text input.');
+          error.unavailable = true;
+          error.severity = 'info';
+          error.canDismiss = true;
+          this.onError(error);
         }
+        
+        return;
       }
 
       // Stop any ongoing speech
@@ -178,30 +350,58 @@ class TeddManager {
       
       this.setState('listening');
       
-      // Play acknowledgment sound or say "Yes?"
-      await VoiceService.speak('Yes?');
+      // Play acknowledgment - "Yes?" or "I'm listening" or "Go ahead"
+      const acknowledgments = [
+        'Yes?',
+        'I\'m listening!',
+        'Go ahead!',
+        'What can I help with?',
+        'I\'m here!'
+      ];
+      const ack = acknowledgments[Math.floor(Math.random() * acknowledgments.length)];
+      
+      await VoiceService.speak(ack);
+      
+      // Small delay to ensure acknowledgment is heard
+      await new Promise(resolve => setTimeout(resolve, 100));
       
       // Start listening for user command
       await VoiceService.startListening(
         this.handleListeningResult.bind(this),
-        (error) => {
-          console.error('[TeddManager] Listening error:', error);
-          
-          // Handle permission-specific errors
-          if (error.permissionDenied || error.message?.includes('denied') || error.message?.includes('not-allowed')) {
-            this.setState('idle');
-            if (this.onError) {
-              this.onError(new Error('Microphone access denied. Please enable it in your settings or use text input.'));
-            }
-            VoiceService.speak("No worries! You can type your messages to me instead.");
-          } else {
-            this.handleError(error);
-          }
-        },
+        this.handleListeningError.bind(this),
         false // not continuous - one-time listening
       );
     } catch (error) {
       console.error('[TeddManager] Error starting active listening:', error);
+      this.handleError(error);
+    }
+  }
+
+  // Handle listening errors during active listening
+  handleListeningError(error) {
+    console.error('[TeddManager] Active listening error:', error);
+    
+    // Handle different error types
+    if (error.unavailable) {
+      this.setState('idle');
+      if (this.onError) {
+        this.onError(error);
+      }
+    } else if (error.permissionDenied || 
+               error.message?.includes('denied') || 
+               error.message?.includes('not-allowed')) {
+      this.setState('idle');
+      this.conversationMode = 'text';
+      
+      if (this.onError) {
+        const permError = new Error('Microphone access denied. Switching to text mode.');
+        permError.severity = 'warning';
+        permError.canDismiss = true;
+        this.onError(permError);
+      }
+      
+      VoiceService.speak("No problem! You can type your messages to me instead.");
+    } else {
       this.handleError(error);
     }
   }
@@ -212,20 +412,39 @@ class TeddManager {
     
     if (!isFinal) {
       this.interimTranscript = transcript;
+      // Optionally notify UI of interim results
+      if (this.onMessage) {
+        this.onMessage({
+          id: 'interim',
+          role: 'user',
+          content: transcript,
+          interim: true,
+          timestamp: new Date(),
+        });
+      }
       return;
     }
     
     // Final transcript received
     if (transcript.trim().length > 0) {
-      this.handleUserInput(transcript);
+      this.handleUserInput(transcript, 'speech');
+    } else {
+      // No speech detected, return to appropriate state
+      if (this.continuousListening && this.wakeWordEnabled) {
+        this.startWakeWordDetection();
+      } else {
+        this.setState('idle');
+      }
     }
     
     this.interimTranscript = '';
   }
 
   // Handle user input (text or voice)
-  async handleUserInput(input) {
+  async handleUserInput(input, inputMode = 'text') {
     try {
+      console.log('[TeddManager] Handling input:', input, 'mode:', inputMode);
+      
       await VoiceService.stopListening();
       this.setState('processing');
       
@@ -235,6 +454,7 @@ class TeddManager {
         role: 'user',
         content: input,
         timestamp: new Date(),
+        mode: inputMode,
       };
       
       if (this.onMessage) {
@@ -273,16 +493,15 @@ class TeddManager {
       // Save conversation
       await this.saveCurrentConversation();
       
-      // Speak response
-      await this.speak(response);
-      
-      // Return to appropriate state
-      if (this.continuousListening && this.wakeWordEnabled) {
-        await this.startWakeWordDetection();
+      // Speak response if in speech mode
+      if (this.conversationMode === 'speech') {
+        await this.speak(response);
       } else {
+        // In text mode, just return to idle
         this.setState('idle');
       }
     } catch (error) {
+      console.error('[TeddManager] Error handling input:', error);
       this.handleError(error);
     }
   }
@@ -298,7 +517,10 @@ class TeddManager {
           this.setState('speaking');
         },
         () => {
-          if (this.continuousListening && this.wakeWordEnabled) {
+          // After speaking, return to appropriate state
+          if (this.conversationMode === 'speech' && 
+              this.continuousListening && 
+              this.wakeWordEnabled) {
             this.startWakeWordDetection();
           } else {
             this.setState('idle');
@@ -318,7 +540,27 @@ class TeddManager {
 
   // Send text message (without voice)
   async sendTextMessage(text) {
-    await this.handleUserInput(text);
+    await this.handleUserInput(text, 'text');
+  }
+
+  // Manually trigger listening (for push-to-talk button)
+  async triggerListening() {
+    if (this.conversationMode !== 'speech') {
+      console.log('[TeddManager] Not in speech mode, ignoring trigger');
+      return;
+    }
+    
+    if (!this.speechAvailable) {
+      if (this.onError) {
+        const error = new Error('Voice input not available on this device.');
+        error.severity = 'warning';
+        error.canDismiss = true;
+        this.onError(error);
+      }
+      return;
+    }
+    
+    await this.startActiveListening();
   }
 
   // Update context (current screen, notes, etc.)
@@ -327,6 +569,7 @@ class TeddManager {
       ...this.currentContext,
       ...context,
     };
+    console.log('[TeddManager] Context updated:', this.currentContext);
   }
 
   // Save current conversation to Firebase
@@ -343,7 +586,7 @@ class TeddManager {
       // Summarize if history gets too long
       await this.geminiService.summarizeHistory();
     } catch (error) {
-      console.error('Error saving conversation:', error);
+      console.error('[TeddManager] Error saving conversation:', error);
     }
   }
 
@@ -385,8 +628,15 @@ class TeddManager {
       });
       
       this.wakeWordEnabled = newPrefs.wakeWordEnabled;
+      
+      // Restart wake word detection if needed
+      if (this.conversationMode === 'speech' && 
+          this.wakeWordEnabled && 
+          this.currentState !== 'wake-word-detection') {
+        await this.startWakeWordDetection();
+      }
     } catch (error) {
-      console.error('Error updating voice preferences:', error);
+      console.error('[TeddManager] Error updating voice preferences:', error);
       throw error;
     }
   }
@@ -396,24 +646,40 @@ class TeddManager {
     return this.currentState;
   }
 
+  // Get current conversation mode
+  getConversationMode() {
+    return this.conversationMode;
+  }
+
+  // Check if speech is available
+  isSpeechAvailable() {
+    return this.speechAvailable;
+  }
+
   // Set state and notify listeners
   setState(state) {
+    const previousState = this.currentState;
     this.currentState = state;
+    
+    console.log('[TeddManager] State change:', previousState, '->', state);
+    
     if (this.onStateChange) {
-      this.onStateChange(state);
+      this.onStateChange(state, previousState);
     }
   }
 
   // Handle errors
   handleError(error) {
-    console.error('Tedd error:', error);
+    console.error('[TeddManager] Error:', error);
     
     if (this.onError) {
       this.onError(error);
     }
     
-    // Return to idle or wake word detection
-    if (this.continuousListening && this.wakeWordEnabled) {
+    // Return to appropriate state
+    if (this.conversationMode === 'speech' && 
+        this.continuousListening && 
+        this.wakeWordEnabled) {
       this.startWakeWordDetection();
     } else {
       this.setState('idle');

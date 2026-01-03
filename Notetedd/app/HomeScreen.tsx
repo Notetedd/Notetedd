@@ -39,7 +39,7 @@ import { Audio } from "expo-av";
 import Sidebar from "./Sidebar";
 import { useSidebar } from "../hooks/useSidebar";
 
-import TeddComponent from '../components/tedd/TeddComponent';
+import TeddComponent from '../components/tedd/TeddComponent.js';
 
 
 
@@ -1328,11 +1328,46 @@ export default function HomeScreen() {
 
       
     </View>
-    <TeddComponent
-        userId={auth.currentUser ? auth.currentUser.uid : ''}
-        geminiApiKey={process.env.GEMINI_API_KEY}
-        currentScreen="Homescreen"
-      />
+    {/* Tedd AI Assistant - Positioned properly */}
+{auth.currentUser && (
+  <TeddComponent
+    userId={auth.currentUser.uid}
+    geminiApiKey={process.env.EXPO_PUBLIC_GEMINI_API_KEY || process.env.GEMINI_API_KEY}
+    currentScreen="Home"
+    context={{
+      userName: fullName,
+      studyAnalytics: {
+        currentStreak: streakCount,
+        totalHours: parseFloat(totalHours),
+        achievements: achievements.map(a => a.label),
+      },
+      recentActivity: recentLectures.slice(0, 1).map(lecture => ({
+        type: 'lecture_viewed',
+        description: `Viewing: ${lecture.title}`,
+        timestamp: new Date(),
+      })),
+    }}
+    onNavigate={(screen, params) => {
+      console.log('[HomeScreen] Tedd navigation:', screen, params);
+      navigation.navigate(screen, params);
+    }}
+    onActionExecute={(actionType, parameters) => {
+      console.log('[HomeScreen] Tedd action:', actionType, parameters);
+      
+      switch (actionType) {
+        case 'startRecording':
+          navigation.navigate('RecordScreen');
+          break;
+        case 'startPomodoro':
+          // Your pomodoro widget will handle this
+          break;
+        case 'viewAnalytics':
+          // Show analytics or scroll to widget
+          break;
+      }
+    }}
+  />
+)}
       </>
   );
 }

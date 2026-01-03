@@ -11,23 +11,8 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { Message } from '../../app/services/Tedd/GeminiService';
-import { TeddState } from '../../app/services/Tedd/TeddManager';
 
-interface TeddChatInterfaceProps {
-  visible: boolean;
-  messages: Message[];
-  state: TeddState;
-  interimTranscript?: string;
-  onClose: () => void;
-  onSendMessage: (message: string) => void;
-  onStartListening: () => void;
-  onStopListening: () => void;
-  onStopSpeaking: () => void;
-  onClearHistory: () => void;
-}
-
-const TeddChatInterface: React.FC<TeddChatInterfaceProps> = ({
+const TeddChatInterface = ({
   visible,
   messages,
   state,
@@ -40,7 +25,7 @@ const TeddChatInterface: React.FC<TeddChatInterfaceProps> = ({
   onClearHistory,
 }) => {
   const [inputText, setInputText] = useState('');
-  const scrollViewRef = useRef<ScrollView>(null);
+  const scrollViewRef = useRef(null);
 
   // Auto-scroll to bottom when new messages arrive
   useEffect(() => {
@@ -68,10 +53,10 @@ const TeddChatInterface: React.FC<TeddChatInterfaceProps> = ({
     }
   };
 
-  const formatTime = (date: Date) => {
-    return new Date(date).toLocaleTimeString([], { 
-      hour: '2-digit', 
-      minute: '2-digit' 
+  const formatTime = (date) => {
+    return new Date(date).toLocaleTimeString([], {
+      hour: '2-digit',
+      minute: '2-digit',
     });
   };
 
@@ -80,24 +65,30 @@ const TeddChatInterface: React.FC<TeddChatInterfaceProps> = ({
       {/* Header */}
       <View style={styles.header}>
         <View style={styles.headerLeft}>
-          <View style={[
-            styles.statusIndicator,
-            state === 'listening' && styles.statusListening,
-            state === 'speaking' && styles.statusSpeaking,
-            state === 'processing' && styles.statusProcessing,
-          ]} />
+          <View
+            style={[
+              styles.statusIndicator,
+              state === 'listening' && styles.statusListening,
+              state === 'speaking' && styles.statusSpeaking,
+              state === 'processing' && styles.statusProcessing,
+            ]}
+          />
           <View>
             <Text style={styles.headerTitle}>Tedd</Text>
             <Text style={styles.headerSubtitle}>
-              {state === 'listening' ? 'Listening...' :
-               state === 'speaking' ? 'Speaking...' :
-               state === 'processing' ? 'Thinking...' :
-               state === 'wake-word-detection' ? 'Say "Hey Tedd"' :
-               'Your AI Study Assistant'}
+              {state === 'listening'
+                ? 'Listening...'
+                : state === 'speaking'
+                ? 'Speaking...'
+                : state === 'processing'
+                ? 'Thinking...'
+                : state === 'wake-word-detection'
+                ? 'Say "Hey Tedd"'
+                : 'Your AI Study Assistant'}
             </Text>
           </View>
         </View>
-        
+
         <View style={styles.headerRight}>
           {state === 'speaking' && (
             <TouchableOpacity
@@ -107,18 +98,15 @@ const TeddChatInterface: React.FC<TeddChatInterfaceProps> = ({
               <Ionicons name="stop-circle-outline" size={24} color="#666" />
             </TouchableOpacity>
           )}
-          
+
           <TouchableOpacity
             style={styles.iconButton}
             onPress={onClearHistory}
           >
             <Ionicons name="trash-outline" size={24} color="#666" />
           </TouchableOpacity>
-          
-          <TouchableOpacity
-            style={styles.iconButton}
-            onPress={onClose}
-          >
+
+          <TouchableOpacity style={styles.iconButton} onPress={onClose}>
             <Ionicons name="close" size={24} color="#666" />
           </TouchableOpacity>
         </View>
@@ -132,8 +120,14 @@ const TeddChatInterface: React.FC<TeddChatInterfaceProps> = ({
       >
         {messages.length === 0 && (
           <View style={styles.emptyState}>
-            <Ionicons name="chatbubble-ellipses-outline" size={64} color="#ccc" />
-            <Text style={styles.emptyStateTitle}>Start a conversation with Tedd</Text>
+            <Ionicons
+              name="chatbubble-ellipses-outline"
+              size={64}
+              color="#ccc"
+            />
+            <Text style={styles.emptyStateTitle}>
+              Start a conversation with Tedd
+            </Text>
             <Text style={styles.emptyStateText}>
               Say "Hey Tedd" or tap the microphone to begin
             </Text>
@@ -145,19 +139,25 @@ const TeddChatInterface: React.FC<TeddChatInterfaceProps> = ({
             key={message.id}
             style={[
               styles.messageContainer,
-              message.role === 'user' ? styles.userMessageContainer : styles.assistantMessageContainer,
+              message.role === 'user'
+                ? styles.userMessageContainer
+                : styles.assistantMessageContainer,
             ]}
           >
             <View
               style={[
                 styles.messageBubble,
-                message.role === 'user' ? styles.userBubble : styles.assistantBubble,
+                message.role === 'user'
+                  ? styles.userBubble
+                  : styles.assistantBubble,
               ]}
             >
               <Text
                 style={[
                   styles.messageText,
-                  message.role === 'user' ? styles.userMessageText : styles.assistantMessageText,
+                  message.role === 'user'
+                    ? styles.userMessageText
+                    : styles.assistantMessageText,
                 ]}
               >
                 {message.content}
@@ -165,7 +165,9 @@ const TeddChatInterface: React.FC<TeddChatInterfaceProps> = ({
               <Text
                 style={[
                   styles.messageTime,
-                  message.role === 'user' ? styles.userMessageTime : styles.assistantMessageTime,
+                  message.role === 'user'
+                    ? styles.userMessageTime
+                    : styles.assistantMessageTime,
                 ]}
               >
                 {formatTime(message.timestamp)}
@@ -174,10 +176,16 @@ const TeddChatInterface: React.FC<TeddChatInterfaceProps> = ({
           </View>
         ))}
 
-        {/* Interim transcript (while listening) */}
+        {/* Interim transcript */}
         {interimTranscript && interimTranscript.length > 0 && (
           <View style={[styles.messageContainer, styles.userMessageContainer]}>
-            <View style={[styles.messageBubble, styles.userBubble, styles.interimBubble]}>
+            <View
+              style={[
+                styles.messageBubble,
+                styles.userBubble,
+                styles.interimBubble,
+              ]}
+            >
               <Text style={[styles.messageText, styles.userMessageText]}>
                 {interimTranscript}
               </Text>
@@ -187,7 +195,9 @@ const TeddChatInterface: React.FC<TeddChatInterfaceProps> = ({
 
         {/* Typing indicator */}
         {state === 'processing' && (
-          <View style={[styles.messageContainer, styles.assistantMessageContainer]}>
+          <View
+            style={[styles.messageContainer, styles.assistantMessageContainer]}
+          >
             <View style={[styles.messageBubble, styles.assistantBubble]}>
               <ActivityIndicator size="small" color="#6200EE" />
             </View>
@@ -201,7 +211,6 @@ const TeddChatInterface: React.FC<TeddChatInterfaceProps> = ({
         keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
       >
         <View style={styles.inputContainer}>
-          {/* Voice visualizer when listening */}
           {state === 'listening' && (
             <View style={styles.voiceVisualizer}>
               <View style={[styles.voiceBar, styles.voiceBar1]} />
@@ -223,7 +232,7 @@ const TeddChatInterface: React.FC<TeddChatInterfaceProps> = ({
               maxLength={500}
               editable={state !== 'listening' && state !== 'processing'}
             />
-            
+
             <TouchableOpacity
               style={[
                 styles.micButton,
@@ -256,10 +265,7 @@ const TeddChatInterface: React.FC<TeddChatInterfaceProps> = ({
 };
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#fff',
-  },
+  container: { flex: 1, backgroundColor: '#fff' },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -267,122 +273,51 @@ const styles = StyleSheet.create({
     padding: 16,
     borderBottomWidth: 1,
     borderBottomColor: '#eee',
-    backgroundColor: '#fff',
   },
-  headerLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
+  headerLeft: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   statusIndicator: {
     width: 12,
     height: 12,
     borderRadius: 6,
     backgroundColor: '#ccc',
   },
-  statusListening: {
-    backgroundColor: '#4CAF50',
-  },
-  statusSpeaking: {
-    backgroundColor: '#2196F3',
-  },
-  statusProcessing: {
-    backgroundColor: '#FF9800',
-  },
-  headerTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#333',
-  },
-  headerSubtitle: {
-    fontSize: 12,
-    color: '#666',
-    marginTop: 2,
-  },
-  headerRight: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  iconButton: {
-    padding: 8,
-  },
-  messagesContainer: {
-    flex: 1,
-    backgroundColor: '#f5f5f5',
-  },
-  messagesContent: {
-    padding: 16,
-    flexGrow: 1,
-  },
+  statusListening: { backgroundColor: '#4CAF50' },
+  statusSpeaking: { backgroundColor: '#2196F3' },
+  statusProcessing: { backgroundColor: '#FF9800' },
+  headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#333' },
+  headerSubtitle: { fontSize: 12, color: '#666', marginTop: 2 },
+  headerRight: { flexDirection: 'row', gap: 8 },
+  iconButton: { padding: 8 },
+  messagesContainer: { flex: 1, backgroundColor: '#f5f5f5' },
+  messagesContent: { padding: 16, flexGrow: 1 },
   emptyState: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
     paddingVertical: 60,
   },
-  emptyStateTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#333',
-    marginTop: 16,
-  },
-  emptyStateText: {
-    fontSize: 14,
-    color: '#666',
-    marginTop: 8,
-    textAlign: 'center',
-  },
-  messageContainer: {
-    marginBottom: 12,
-    maxWidth: '80%',
-  },
-  userMessageContainer: {
-    alignSelf: 'flex-end',
-  },
-  assistantMessageContainer: {
-    alignSelf: 'flex-start',
-  },
-  messageBubble: {
-    padding: 12,
-    borderRadius: 16,
-  },
-  userBubble: {
-    backgroundColor: '#6200EE',
-    borderBottomRightRadius: 4,
-  },
+  emptyStateTitle: { fontSize: 18, fontWeight: '600', marginTop: 16 },
+  emptyStateText: { fontSize: 14, color: '#666', marginTop: 8 },
+  messageContainer: { marginBottom: 12, maxWidth: '80%' },
+  userMessageContainer: { alignSelf: 'flex-end' },
+  assistantMessageContainer: { alignSelf: 'flex-start' },
+  messageBubble: { padding: 12, borderRadius: 16 },
+  userBubble: { backgroundColor: '#6200EE', borderBottomRightRadius: 4 },
   assistantBubble: {
     backgroundColor: '#fff',
     borderBottomLeftRadius: 4,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
     elevation: 2,
   },
-  interimBubble: {
-    opacity: 0.6,
-  },
-  messageText: {
-    fontSize: 16,
-    lineHeight: 22,
-  },
-  userMessageText: {
-    color: '#fff',
-  },
-  assistantMessageText: {
-    color: '#333',
-  },
-  messageTime: {
-    fontSize: 11,
-    marginTop: 4,
-  },
+  interimBubble: { opacity: 0.6 },
+  messageText: { fontSize: 16, lineHeight: 22 },
+  userMessageText: { color: '#fff' },
+  assistantMessageText: { color: '#333' },
+  messageTime: { fontSize: 11, marginTop: 4 },
   userMessageTime: {
-    color: 'rgba(255, 255, 255, 0.7)',
+    color: 'rgba(255,255,255,0.7)',
     textAlign: 'right',
   },
-  assistantMessageTime: {
-    color: '#999',
-  },
+  assistantMessageTime: { color: '#999' },
   inputContainer: {
     backgroundColor: '#fff',
     borderTopWidth: 1,
@@ -392,25 +327,16 @@ const styles = StyleSheet.create({
   voiceVisualizer: {
     flexDirection: 'row',
     justifyContent: 'center',
-    alignItems: 'center',
     gap: 4,
     paddingVertical: 12,
   },
-  voiceBar: {
-    width: 4,
-    backgroundColor: '#4CAF50',
-    borderRadius: 2,
-  },
+  voiceBar: { width: 4, backgroundColor: '#4CAF50', borderRadius: 2 },
   voiceBar1: { height: 20 },
   voiceBar2: { height: 30 },
   voiceBar3: { height: 40 },
   voiceBar4: { height: 30 },
   voiceBar5: { height: 20 },
-  inputRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    gap: 8,
-  },
+  inputRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 8 },
   textInput: {
     flex: 1,
     backgroundColor: '#f5f5f5',
@@ -428,9 +354,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  micButtonActive: {
-    backgroundColor: '#4CAF50',
-  },
+  micButtonActive: { backgroundColor: '#4CAF50' },
   sendButton: {
     width: 48,
     height: 48,

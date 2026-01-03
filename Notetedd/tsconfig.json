@@ -13,5 +13,5 @@
     "**/*.tsx",
     ".expo/types/**/*.ts",
     "expo-env.d.ts"
-, "app/services/Tedd/VoiceService.js", "app/services/Tedd/TeddManager.js", "app/services/Tedd/TeddFirebaseService.js", "app/services/Tedd/GeminiService.js"  ]
+, "app/services/Tedd/VoiceService.js", "app/services/Tedd/TeddManager.js", "app/services/Tedd/TeddFirebaseService.js", "app/services/Tedd/GeminiService.js", "components/tedd/TeddComponent.js", "components/tedd/TeddFloatingButton.js", "components/tedd/TeddVoiceSettings.js", "components/tedd/TeddChatInterface.js"  ]
 }
