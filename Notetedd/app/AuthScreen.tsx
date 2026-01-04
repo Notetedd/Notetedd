@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from "react";
 import Icon from "react-native-vector-icons/MaterialIcons";
+ import Svg, { Path } from 'react-native-svg';
 import { useRouter } from "expo-router";
 import { 
   View, 
@@ -24,9 +25,15 @@ import {
   updateProfile,
   GoogleAuthProvider,
   signInWithPopup,
+  signInWithCredential,
+  OAuthProvider,
 } from "firebase/auth";
 import { doc, setDoc } from "firebase/firestore";
 import Toast, { showToast } from "../toastConfig";
+import * as Google from 'expo-auth-session/providers/google';
+import * as WebBrowser from 'expo-web-browser';
+
+WebBrowser.maybeCompleteAuthSession();
 
 const { width, height } = Dimensions.get("window");
 
@@ -42,6 +49,23 @@ export default function AuthScreen() {
   const router = useRouter();
 
   const { theme, colors } = useTheme();
+
+  // Configure Google Sign-In for mobile  
+  const [request, response, promptAsync] = Google.useAuthRequest({
+    expoClientId: 'EXPO_CLIENT_ID.apps.googleusercontent.com',
+    iosClientId: '378006316872-i6jvms4t2qfaob42pv7405n8egpp98sk.apps.googleusercontent.com',
+    androidClientId: '378006316872-agteaq0ft356k5ub7lajbk22mqg4s8m2.apps.googleusercontent.com',
+    webClientId: '378006316872-gn2he51al2pbfbtm20ukr2550imnso3a.apps.googleusercontent.com',
+  });
+
+  // Handle Google Sign-In response for mobile
+  useEffect(() => {
+    if (response?.type === 'success') {
+      const { id_token } = response.params;
+      const credential = GoogleAuthProvider.credential(id_token);
+      handleGoogleCredential(credential);
+    }
+  }, [response]);
 
   // Animations
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -266,16 +290,11 @@ export default function AuthScreen() {
     }
   };
 
-  const handleGoogleSignUp = async () => {
-    if (Platform.OS !== 'web') {
-      showToast("info", "Coming Soon", "Google Sign-Up on mobile is coming soon! Please use email sign-up.");
-      return;
-    }
-
+  // Handle Google credential for both web and mobile
+  const handleGoogleCredential = async (credential) => {
     try {
       setIsLoading(true);
-      const provider = new GoogleAuthProvider();
-      const result = await signInWithPopup(auth, provider);
+      const result = await signInWithCredential(auth, credential);
       const user = result.user;
 
       await setDoc(doc(db, "users", user.uid), {
@@ -306,6 +325,64 @@ export default function AuthScreen() {
     }
   };
 
+  // Web Google Sign-In
+  const handleWebGoogleSignUp = async () => {
+    try {
+      setIsLoading(true);
+      const provider = new GoogleAuthProvider();
+      const result = await signInWithPopup(auth, provider);
+      const user = result.user;
+
+      await setDoc(doc(db, "users", user.uid), {
+        fullName: user.displayName || "Google User",
+        email: user.email,
+        createdAt: new Date().toISOString(),
+        authProvider: "google",
+        photoURL: user.photoURL,
+      }, { merge: true });
+
+      showToast("success", "Success", "Signed up with Google successfully!");
+      
+      Animated.parallel([
+        Animated.timing(fadeAnim, {
+          toValue: 0,
+          duration: 300,
+          useNativeDriver: true,
+        }),
+      ]).start(() => {
+        router.push("/HomeScreen");
+      });
+
+    } catch (error) {
+      console.error("Google Sign Up Error:", error);
+      
+      // Handle specific errors
+      if (error.code === 'auth/popup-closed-by-user') {
+        showToast("info", "Cancelled", "Sign-in was cancelled.");
+      } else if (error.code === 'auth/popup-blocked') {
+        showToast("error", "Popup Blocked", "Please allow popups for this site.");
+      } else {
+        showToast("error", "Error", "Google sign-up failed. Please try again.");
+      }
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Unified Google Sign-Up handler
+  const handleGoogleSignUp = async () => {
+    if (Platform.OS === 'web') {
+      await handleWebGoogleSignUp();
+    } else {
+      // Mobile: Use expo-auth-session
+      if (!request) {
+        showToast("error", "Error", "Google Sign-In is not configured properly.");
+        return;
+      }
+      await promptAsync();
+    }
+  };
+
   const getPasswordStrength = () => {
     if (!password) return { strength: 0, label: "", color: "#E5E7EB" };
     
@@ -328,6 +405,18 @@ export default function AuthScreen() {
   };
 
   const passwordStrength = getPasswordStrength();
+
+  // SVG Google Icon Component
+  const GoogleIcon = () => (
+    <View style={{ width: 22, height: 22 }}>
+      <Svg width="22" height="22" viewBox="0 0 22 22" fill="none">
+        <Path d="M21.8055 11.2301C21.8055 10.4301 21.7388 9.65674 21.6165 8.90674H11.2222V13.3001H17.2055C16.9444 14.6001 16.1888 15.7112 15.0721 16.4667V19.2001H18.5721C20.6277 17.3334 21.8055 14.5334 21.8055 11.2301Z" fill="#4285F4"/>
+        <Path d="M11.2222 21.8667C14.1666 21.8667 16.6277 20.8889 18.5777 19.2L15.0777 16.4667C14.1277 17.1223 12.8944 17.5056 11.2277 17.5056C8.38881 17.5056 5.99437 15.6167 5.14437 13.0667H1.5166V15.8778C3.45548 19.7223 7.0666 21.8667 11.2222 21.8667Z" fill="#34A853"/>
+        <Path d="M5.13882 13.0667C4.91104 12.4111 4.78326 11.7111 4.78326 11C4.78326 10.2889 4.91104 9.58888 5.13882 8.93333V6.12222H1.51104C0.783263 7.57778 0.366595 9.23889 0.366595 11C0.366595 12.7611 0.783263 14.4222 1.51104 15.8778L5.13882 13.0667Z" fill="#FBBC05"/>
+        <Path d="M11.2222 4.49444C13.0277 4.49444 14.6444 5.13333 15.9277 6.35556L19.0277 3.25556C16.6222 1.01111 14.161 0 11.2222 0C7.0666 0 3.45548 2.14444 1.5166 6.12222L5.14437 8.93333C5.99437 6.38333 8.38881 4.49444 11.2222 4.49444Z" fill="#EA4335"/>
+      </Svg>
+    </View>
+  );
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -431,7 +520,12 @@ export default function AuthScreen() {
                     colors={["#ffffff", "#f8f9fa"]}
                     style={styles.logoGradient}
                   >
-                    <Icon name="note" size={48} color="#e67e22" />
+                    {/* Replace with your app logo image */}
+                    <Image
+                      source={require('../public/icon.jpeg')} // Update this path to your logo
+                      style={styles.logoImage}
+                      resizeMode="contain"
+                    />
                   </LinearGradient>
                 </Animated.View>
                 <Text style={styles.brandName}>NoteTedd</Text>
@@ -644,10 +738,10 @@ export default function AuthScreen() {
                   <TouchableOpacity 
                     onPress={handleGoogleSignUp}
                     style={styles.googleButton}
-                    disabled={isLoading}
+                    disabled={isLoading || (Platform.OS !== 'web' && !request)}
                     activeOpacity={0.8}
                   >
-                    <Icon name="login" size={22} color="#4285F4" />
+                    <GoogleIcon />
                     <Text style={styles.googleButtonText}>Sign up with Google</Text>
                   </TouchableOpacity>
 
@@ -706,6 +800,10 @@ const styles = StyleSheet.create({
     borderRadius: 1000,
     overflow: "hidden",
   },
+  logoImage: {
+  width: 56,
+  height: 56,
+},
   circle1: {
     width: 280,
     height: 280,

@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from "react";
 import Icon from "react-native-vector-icons/MaterialIcons";
+import Svg, { Path } from 'react-native-svg';
 import { useRouter } from "expo-router";
 import { 
   View, 
@@ -23,9 +24,16 @@ import {
   signInWithEmailAndPassword,
   GoogleAuthProvider,
   signInWithPopup,
+  signInWithCredential,
 } from "firebase/auth";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 import Toast, { showToast } from "../toastConfig";
+
+// For mobile Google Sign-In
+import * as Google from 'expo-auth-session/providers/google';
+import * as WebBrowser from 'expo-web-browser';
+
+WebBrowser.maybeCompleteAuthSession();
 
 const { width, height } = Dimensions.get("window");
 
@@ -38,6 +46,23 @@ export default function LoginScreen() {
   const router = useRouter();
 
   const { theme, colors } = useTheme();
+
+  // Configure Google Sign-In for mobile
+  const [request, response, promptAsync] = Google.useAuthRequest({
+   expoClientId: 'EXPO_CLIENT_ID.apps.googleusercontent.com',
+    iosClientId: '378006316872-i6jvms4t2qfaob42pv7405n8egpp98sk.apps.googleusercontent.com',
+    androidClientId: '378006316872-agteaq0ft356k5ub7lajbk22mqg4s8m2.apps.googleusercontent.com',
+    webClientId: '378006316872-gn2he51al2pbfbtm20ukr2550imnso3a.apps.googleusercontent.com',
+  });
+
+  // Handle Google Sign-In response for mobile
+  useEffect(() => {
+    if (response?.type === 'success') {
+      const { id_token } = response.params;
+      const credential = GoogleAuthProvider.credential(id_token);
+      handleGoogleCredential(credential);
+    }
+  }, [response]);
 
   // Animations
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -230,16 +255,11 @@ export default function LoginScreen() {
     }
   };
 
-  const handleGoogleSignIn = async () => {
-    if (Platform.OS !== 'web') {
-      showToast("info", "Coming Soon", "Google Sign-In on mobile is coming soon! Please use email login.");
-      return;
-    }
-
+  // Handle Google credential for both web and mobile
+  const handleGoogleCredential = async (credential) => {
     try {
       setLoading(true);
-      const provider = new GoogleAuthProvider();
-      const result = await signInWithPopup(auth, provider);
+      const result = await signInWithCredential(auth, credential);
       const user = result.user;
 
       // Get or create user document
@@ -280,9 +300,88 @@ export default function LoginScreen() {
     }
   };
 
+  // Web Google Sign-In
+  const handleWebGoogleSignIn = async () => {
+    try {
+      setLoading(true);
+      const provider = new GoogleAuthProvider();
+      const result = await signInWithPopup(auth, provider);
+      const user = result.user;
+
+      // Get or create user document
+      const userDoc = await getDoc(doc(db, "users", user.uid));
+      
+      if (!userDoc.exists()) {
+        await setDoc(doc(db, "users", user.uid), {
+          fullName: user.displayName || "Google User",
+          email: user.email,
+          createdAt: new Date().toISOString(),
+          authProvider: "google",
+          photoURL: user.photoURL,
+        });
+      }
+
+      const fullName = userDoc.exists() 
+        ? userDoc.data().fullName 
+        : user.displayName || "User";
+
+      showToast("success", "Welcome Back!", `Hello, ${fullName}! 🎉`);
+
+      Animated.parallel([
+        Animated.timing(fadeAnim, {
+          toValue: 0,
+          duration: 300,
+          useNativeDriver: true,
+        }),
+      ]).start(() => {
+        router.push({ pathname: "/HomeScreen", params: { username: fullName } });
+      });
+
+    } catch (error) {
+      console.error("Google Sign In Error:", error);
+      
+      if (error.code === 'auth/popup-closed-by-user') {
+        showToast("info", "Cancelled", "Sign-in was cancelled.");
+      } else if (error.code === 'auth/popup-blocked') {
+        showToast("error", "Popup Blocked", "Please allow popups for this site.");
+      } else {
+        showToast("error", "Error", "Google sign-in failed. Please try again.");
+      }
+      shakeAnimation();
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Unified Google Sign-In handler
+  const handleGoogleSignIn = async () => {
+    if (Platform.OS === 'web') {
+      await handleWebGoogleSignIn();
+    } else {
+      // Mobile: Use expo-auth-session
+      if (!request) {
+        showToast("error", "Error", "Google Sign-In is not configured properly.");
+        return;
+      }
+      await promptAsync();
+    }
+  };
+
   const handleForgotPassword = () => {
     router.push("/ResetPasswordScreen");
   };
+
+  // Google Icon SVG Component
+  const GoogleIcon = () => (
+    <View style={{ width: 24, height: 24 }}>
+      <Svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+        <Path d="M23.7449 12.27C23.7449 11.48 23.6749 10.73 23.5449 10H12.2549V14.51H18.7249C18.4349 15.99 17.5849 17.24 16.3249 18.09V21.09H20.1849C22.4449 19 23.7449 15.92 23.7449 12.27Z" fill="#4285F4"/>
+        <Path d="M12.2549 24C15.4949 24 18.2049 22.92 20.1849 21.09L16.3249 18.09C15.2449 18.81 13.8749 19.25 12.2549 19.25C9.12492 19.25 6.47492 17.14 5.52492 14.29L1.54492 17.38C3.51492 21.3 7.56492 24 12.2549 24Z" fill="#34A853"/>
+        <Path d="M5.52492 14.29C5.27492 13.57 5.14492 12.8 5.14492 12C5.14492 11.2 5.28492 10.43 5.52492 9.71V6.62L1.54492 9.71C0.724922 11.33 0.254922 13.15 0.254922 15C0.254922 16.85 0.724922 18.67 1.54492 20.29L5.52492 14.29Z" fill="#FBBC05"/>
+        <Path d="M12.2549 4.75C14.0249 4.75 15.6049 5.36 16.8549 6.55L20.2749 3.13C18.2049 1.19 15.4949 0 12.2549 0C7.56492 0 3.51492 2.7 1.54492 6.62L5.52492 9.71C6.47492 6.86 9.12492 4.75 12.2549 4.75Z" fill="#EA4335"/>
+      </Svg>
+    </View>
+  );
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -386,7 +485,12 @@ export default function LoginScreen() {
                     colors={["#ffffff", "#f8f9fa"]}
                     style={styles.logoGradient}
                   >
-                    <Image source={require('./../assets/images/icon.png')} style={{ width: 48, height: 48, tintColor: "#9B5DE5" }} />
+                    {/* Your App Logo */}
+                    <Image 
+                      source={require('../public/icon.jpeg')} // Update this path to your logo
+                      style={styles.logoImage}
+                      resizeMode="contain"
+                    />
                   </LinearGradient>
                 </Animated.View>
                 <Text style={styles.brandName}>NoteTedd</Text>
@@ -525,14 +629,11 @@ export default function LoginScreen() {
                   <TouchableOpacity 
                     onPress={handleGoogleSignIn}
                     style={styles.googleButton}
-                    disabled={loading}
+                    disabled={loading || (Platform.OS !== 'web' && !request)}
                     activeOpacity={0.8}
                   >
                     <View style={styles.googleContent}>
-                      <Image
-                        source={{ uri: 'https://www.google.com/images/branding/googleg/1x/googleg_standard_color_128dp.png' }}
-                        style={styles.googleIcon}
-                      />
+                      <GoogleIcon />
                       <Text style={styles.googleButtonText}>Sign in with Google</Text>
                     </View>
                   </TouchableOpacity>
@@ -821,6 +922,10 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+  logoImage: {
+  width: 60,
+  height: 60,
+},
   input: {
     flex: 1,
     height: 56,

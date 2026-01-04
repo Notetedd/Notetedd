@@ -10,7 +10,6 @@ import {
   ActivityIndicator,
   Modal,
   FlatList,
-  TextInput,
   Image,
 } from "react-native";
 import { MaterialIcons } from "@expo/vector-icons";
@@ -22,21 +21,27 @@ import BackButton from "../components/Backbutton";
 
 // Firebase imports
 import { db, auth } from '../firebaseConfig';
-import { collection, addDoc, getDocs, query, where, serverTimestamp } from 'firebase/firestore';
+import { 
+  collection, 
+  addDoc, 
+  serverTimestamp, 
+  doc, 
+  setDoc, 
+  getDoc, 
+  query, 
+  where, 
+  getDocs 
+} from 'firebase/firestore';
 
 // Google OAuth Configuration
 const GOOGLE_CLIENT_ID = "378006316872-gn2he51al2pbfbtm20ukr2550imnso3a.apps.googleusercontent.com";
-const GOOGLE_REDIRECT_URI = AuthSession.makeRedirectUri({
-  scheme: 'myapp',
-  path: 'redirect'
-});
 
 // Google Classroom API Scopes
 const CLASSROOM_SCOPES = [
   'https://www.googleapis.com/auth/classroom.courses.readonly',
   'https://www.googleapis.com/auth/classroom.coursework.me.readonly',
   'https://www.googleapis.com/auth/classroom.announcements.readonly',
-  'https://www.googleapis.com/auth/classroom.course-work-materials.readonly',
+  'https://www.googleapis.com/auth/classroom.student-submissions.me.readonly',
   'https://www.googleapis.com/auth/drive.readonly',
 ];
 
@@ -56,6 +61,7 @@ export default function SyncClassroomScreen({ navigation }) {
   const [processingProgress, setProcessingProgress] = useState("");
   const [userEmail, setUserEmail] = useState("");
   const [showRedirectInfo, setShowRedirectInfo] = useState(false);
+  const [importedMaterials, setImportedMaterials] = useState(new Set());
 
   const { theme, colors } = useTheme();
 
@@ -63,32 +69,187 @@ export default function SyncClassroomScreen({ navigation }) {
   const GEMINI_API_KEY = "AIzaSyCZVQqMteS8jSA_cAYOUS0XxzwHxzgIaNI";
   const GEMINI_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent";
 
-  // OAuth Discovery and Request
+  // OAuth Discovery
   const discovery = {
     authorizationEndpoint: 'https://accounts.google.com/o/oauth2/v2/auth',
     tokenEndpoint: 'https://oauth2.googleapis.com/token',
   };
 
+  // Generate redirect URI based on platform
+  const redirectUri = React.useMemo(() => {
+    if (Platform.OS === 'web') {
+      // For web, use window.location.origin
+      if (typeof window !== 'undefined') {
+        return `${window.location.origin}/auth`;
+      }
+      return 'http://localhost:19006/auth';
+    }
+    // For native (iOS/Android), use custom scheme
+    return AuthSession.makeRedirectUri({
+      scheme: 'notetedd',
+      path: 'auth'
+    });
+  }, []);
+
+  // OAuth Request Configuration - Using Implicit Flow (Token)
   const [request, response, promptAsync] = AuthSession.useAuthRequest(
     {
       clientId: GOOGLE_CLIENT_ID,
       scopes: CLASSROOM_SCOPES,
-      redirectUri: GOOGLE_REDIRECT_URI,
+      redirectUri: redirectUri,
+      // Use implicit flow (token) for native apps without client secret
       responseType: AuthSession.ResponseType.Token,
+      // Disable PKCE since we're using implicit flow
+      usePKCE: false,
+      extraParams: {
+        // Force account selection
+        prompt: 'select_account',
+        // Request offline access
+        access_type: 'online', // Changed to 'online' for implicit flow
+      },
     },
     discovery
   );
+
+  // Load saved authentication on mount
+  useEffect(() => {
+    loadSavedAuth();
+  }, []);
+
+  // Load saved authentication from Firebase
+  const loadSavedAuth = async () => {
+    const currentUser = auth.currentUser;
+    if (!currentUser) return;
+
+    try {
+      const userDocRef = doc(db, 'users', currentUser.uid);
+      const userDoc = await getDoc(userDocRef);
+
+      if (userDoc.exists()) {
+        const data = userDoc.data();
+        if (data.googleClassroom) {
+          setAccessToken(data.googleClassroom.accessToken);
+          setUserEmail(data.googleClassroom.email);
+          setIsAuthenticated(true);
+          
+          // Fetch courses after loading auth
+          fetchCourses(data.googleClassroom.accessToken);
+          
+          // Load imported materials
+          await loadImportedMaterials(currentUser.uid);
+        }
+      }
+    } catch (error) {
+      console.error('Error loading saved auth:', error);
+    }
+  };
+
+  // Load list of already imported materials
+  const loadImportedMaterials = async (userId) => {
+    try {
+      const recordingsRef = collection(db, 'recordings');
+      const q = query(
+        recordingsRef,
+        where('userId', '==', userId),
+        where('source', '==', 'google_classroom')
+      );
+      
+      const snapshot = await getDocs(q);
+      const imported = new Set();
+      
+      snapshot.forEach((doc) => {
+        const data = doc.data();
+        if (data.classroomMaterialId) {
+          imported.add(data.classroomMaterialId);
+        }
+      });
+      
+      setImportedMaterials(imported);
+      console.log(`📚 Loaded ${imported.size} previously imported materials`);
+    } catch (error) {
+      console.error('Error loading imported materials:', error);
+    }
+  };
+
+  // Save authentication to Firebase
+  const saveAuthToFirebase = async (token, email) => {
+    const currentUser = auth.currentUser;
+    if (!currentUser) return;
+
+    try {
+      const userDocRef = doc(db, 'users', currentUser.uid);
+      await setDoc(userDocRef, {
+        googleClassroom: {
+          accessToken: token,
+          email: email,
+          connectedAt: serverTimestamp(),
+        },
+        updatedAt: serverTimestamp(),
+      }, { merge: true });
+      
+      console.log('✅ Auth saved to Firebase');
+    } catch (error) {
+      console.error('Error saving auth:', error);
+    }
+  };
+
+  // Remove authentication from Firebase
+  const removeAuthFromFirebase = async () => {
+    const currentUser = auth.currentUser;
+    if (!currentUser) return;
+
+    try {
+      const userDocRef = doc(db, 'users', currentUser.uid);
+      await setDoc(userDocRef, {
+        googleClassroom: null,
+        updatedAt: serverTimestamp(),
+      }, { merge: true });
+      
+      console.log('✅ Auth removed from Firebase');
+    } catch (error) {
+      console.error('Error removing auth:', error);
+    }
+  };
 
   // Handle OAuth response
   useEffect(() => {
     if (response?.type === 'success') {
       const { access_token } = response.params;
-      setAccessToken(access_token);
-      setIsAuthenticated(true);
-      fetchUserProfile(access_token);
-      fetchCourses(access_token);
+      
+      if (access_token) {
+        setAccessToken(access_token);
+        setIsAuthenticated(true);
+        
+        // Fetch user profile and courses
+        fetchUserProfile(access_token).then(email => {
+          if (email) {
+            // Save to Firebase
+            saveAuthToFirebase(access_token, email);
+            
+            // Load imported materials
+            if (auth.currentUser) {
+              loadImportedMaterials(auth.currentUser.uid);
+            }
+          }
+        });
+        fetchCourses(access_token);
+      }
     } else if (response?.type === 'error') {
-      Alert.alert('Authentication Error', 'Failed to authenticate with Google Classroom');
+      console.error('Auth error:', response.error);
+      Alert.alert(
+        'Authentication Error',
+        `Failed to authenticate: ${response.error?.message || 'Unknown error'}`,
+        [
+          {
+            text: 'Show Setup Info',
+            onPress: () => setShowRedirectInfo(true)
+          },
+          {
+            text: 'OK',
+            style: 'cancel'
+          }
+        ]
+      );
     }
   }, [response]);
 
@@ -98,10 +259,15 @@ export default function SyncClassroomScreen({ navigation }) {
       const response = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
         headers: { Authorization: `Bearer ${token}` },
       });
+      
+      if (!response.ok) throw new Error('Failed to fetch user profile');
+      
       const data = await response.json();
       setUserEmail(data.email);
+      return data.email;
     } catch (error) {
       console.error('Error fetching user profile:', error);
+      return null;
     }
   };
 
@@ -110,14 +276,15 @@ export default function SyncClassroomScreen({ navigation }) {
     setIsLoading(true);
     try {
       const response = await fetch(
-        'https://classroom.googleapis.com/v1/courses?courseStates=ACTIVE',
+        'https://classroom.googleapis.com/v1/courses?courseStates=ACTIVE&pageSize=50',
         {
           headers: { Authorization: `Bearer ${token}` },
         }
       );
 
       if (!response.ok) {
-        throw new Error('Failed to fetch courses');
+        const errorData = await response.json();
+        throw new Error(errorData.error?.message || 'Failed to fetch courses');
       }
 
       const data = await response.json();
@@ -133,7 +300,7 @@ export default function SyncClassroomScreen({ navigation }) {
       }
     } catch (error) {
       console.error('Error fetching courses:', error);
-      Alert.alert('Error', 'Failed to fetch courses from Google Classroom');
+      Alert.alert('Error', `Failed to fetch courses: ${error.message}`);
     } finally {
       setIsLoading(false);
     }
@@ -149,68 +316,85 @@ export default function SyncClassroomScreen({ navigation }) {
 
       // Fetch Announcements
       setProcessingProgress("Fetching announcements...");
-      const announcementsResponse = await fetch(
-        `https://classroom.googleapis.com/v1/courses/${courseId}/announcements`,
-        { headers: { Authorization: `Bearer ${accessToken}` } }
-      );
-      
-      if (announcementsResponse.ok) {
-        const announcementsData = await announcementsResponse.json();
-        const announcements = (announcementsData.announcements || []).map(item => ({
-          id: item.id,
-          type: 'announcement',
-          title: item.text?.substring(0, 50) || 'Untitled Announcement',
-          description: item.text || '',
-          createdTime: item.creationTime,
-          materials: item.materials || [],
-        }));
-        materials.push(...announcements);
+      try {
+        const announcementsResponse = await fetch(
+          `https://classroom.googleapis.com/v1/courses/${courseId}/announcements?pageSize=50`,
+          { headers: { Authorization: `Bearer ${accessToken}` } }
+        );
+        
+        if (announcementsResponse.ok) {
+          const announcementsData = await announcementsResponse.json();
+          const announcements = (announcementsData.announcements || []).map(item => ({
+            id: item.id,
+            type: 'announcement',
+            title: item.text?.substring(0, 50) || 'Untitled Announcement',
+            description: item.text || '',
+            createdTime: item.creationTime,
+            materials: item.materials || [],
+          }));
+          materials.push(...announcements);
+        }
+      } catch (error) {
+        console.log('No announcements found');
       }
 
       // Fetch Course Work
       setProcessingProgress("Fetching assignments...");
-      const courseWorkResponse = await fetch(
-        `https://classroom.googleapis.com/v1/courses/${courseId}/courseWork`,
-        { headers: { Authorization: `Bearer ${accessToken}` } }
-      );
-      
-      if (courseWorkResponse.ok) {
-        const courseWorkData = await courseWorkResponse.json();
-        const assignments = (courseWorkData.courseWork || []).map(item => ({
-          id: item.id,
-          type: 'assignment',
-          title: item.title || 'Untitled Assignment',
-          description: item.description || '',
-          createdTime: item.creationTime,
-          dueDate: item.dueDate,
-          materials: item.materials || [],
-        }));
-        materials.push(...assignments);
+      try {
+        const courseWorkResponse = await fetch(
+          `https://classroom.googleapis.com/v1/courses/${courseId}/courseWork?pageSize=50`,
+          { headers: { Authorization: `Bearer ${accessToken}` } }
+        );
+        
+        if (courseWorkResponse.ok) {
+          const courseWorkData = await courseWorkResponse.json();
+          const assignments = (courseWorkData.courseWork || []).map(item => ({
+            id: item.id,
+            type: 'assignment',
+            title: item.title || 'Untitled Assignment',
+            description: item.description || '',
+            createdTime: item.creationTime,
+            dueDate: item.dueDate,
+            materials: item.materials || [],
+          }));
+          materials.push(...assignments);
+        }
+      } catch (error) {
+        console.log('No course work found');
       }
 
       // Fetch Course Work Materials
       setProcessingProgress("Fetching course materials...");
-      const materialsResponse = await fetch(
-        `https://classroom.googleapis.com/v1/courses/${courseId}/courseWorkMaterials`,
-        { headers: { Authorization: `Bearer ${accessToken}` } }
-      );
-      
-      if (materialsResponse.ok) {
-        const materialsData = await materialsResponse.json();
-        const courseMats = (materialsData.courseWorkMaterial || []).map(item => ({
-          id: item.id,
-          type: 'material',
-          title: item.title || 'Untitled Material',
-          description: item.description || '',
-          createdTime: item.creationTime,
-          materials: item.materials || [],
-        }));
-        materials.push(...courseMats);
+      try {
+        const materialsResponse = await fetch(
+          `https://classroom.googleapis.com/v1/courses/${courseId}/courseWorkMaterials?pageSize=50`,
+          { headers: { Authorization: `Bearer ${accessToken}` } }
+        );
+        
+        if (materialsResponse.ok) {
+          const materialsData = await materialsResponse.json();
+          const courseMats = (materialsData.courseWorkMaterial || []).map(item => ({
+            id: item.id,
+            type: 'material',
+            title: item.title || 'Untitled Material',
+            description: item.description || '',
+            createdTime: item.creationTime,
+            materials: item.materials || [],
+          }));
+          materials.push(...courseMats);
+        }
+      } catch (error) {
+        console.log('No materials found');
       }
 
       console.log(`📝 Found ${materials.length} materials`);
       setCourseMaterials(materials);
-      setShowMaterialsModal(true);
+      
+      if (materials.length > 0) {
+        setShowMaterialsModal(true);
+      } else {
+        Alert.alert('No Materials', 'No materials found for this course.');
+      }
     } catch (error) {
       console.error('Error fetching materials:', error);
       Alert.alert('Error', 'Failed to fetch course materials');
@@ -240,7 +424,11 @@ export default function SyncClassroomScreen({ navigation }) {
 
   // Select all materials
   const selectAllMaterials = () => {
-    setSelectedMaterials(courseMaterials.map(m => m.id));
+    // Only select materials that haven't been imported
+    const selectableMaterials = courseMaterials
+      .filter(m => !importedMaterials.has(m.id))
+      .map(m => m.id);
+    setSelectedMaterials(selectableMaterials);
   };
 
   // Deselect all materials
@@ -290,6 +478,8 @@ export default function SyncClassroomScreen({ navigation }) {
 
       // Process attached materials (Google Drive files, links, etc.)
       if (material.materials && material.materials.length > 0) {
+        setProcessingProgress(`Processing attachments for: ${material.title}`);
+        
         for (const mat of material.materials) {
           if (mat.driveFile && mat.driveFile.driveFile) {
             const fileId = mat.driveFile.driveFile.id;
@@ -310,10 +500,14 @@ export default function SyncClassroomScreen({ navigation }) {
         }
       }
 
+      setProcessingProgress(`Generating notes with AI for: ${material.title}`);
+
       // Generate notes with Gemini
       const prompt = `You are an expert note-taking assistant. A student has received the following content from their Google Classroom:
 
 ${contentText}
+
+Your task is to create comprehensive, well-organized study notes that will help the student learn and retain this information effectively.
 
 IMPORTANT FORMATTING RULES:
 - DO NOT use asterisks (*) for formatting
@@ -321,14 +515,39 @@ IMPORTANT FORMATTING RULES:
 - DO NOT add quotes around text
 - Use plain text with clear structure
 
-Create organized study notes with:
-1. Title (based on the material)
-2. Main Topics and Subtopics
-3. Key Concepts and Definitions
-4. Important Points
-5. Summary
+Create organized study notes with the following structure:
 
-Format as clean, readable plain text suitable for students.`;
+1. TITLE
+   - Create a clear, descriptive title based on the material
+
+2. OVERVIEW
+   - Provide a brief summary of what this material covers
+   - Explain the key learning objectives
+
+3. MAIN CONTENT
+   - Break down the content into logical sections
+   - Use clear headings for different topics
+   - Explain concepts in simple, understandable language
+   - Include important definitions
+   - Highlight key points and takeaways
+
+4. KEY CONCEPTS
+   - List and explain the most important concepts
+   - Provide context and examples where relevant
+
+5. IMPORTANT DETAILS
+   - Include any dates, numbers, formulas, or specific facts
+   - Note any deadlines or requirements mentioned
+
+6. SUMMARY
+   - Provide a concise recap of the main points
+   - Emphasize what the student should remember
+
+7. STUDY TIPS (if applicable)
+   - Suggest how to approach learning this material
+   - Recommend any follow-up actions
+
+Format as clean, readable plain text that is easy to review and study from. Make the notes thorough but concise, focusing on understanding and retention.`;
 
       const response = await fetch(`${GEMINI_ENDPOINT}?key=${GEMINI_API_KEY}`, {
         method: "POST",
@@ -336,16 +555,17 @@ Format as clean, readable plain text suitable for students.`;
         body: JSON.stringify({
           contents: [{ parts: [{ text: prompt }] }],
           generationConfig: {
-            temperature: 0.3,
-            topK: 20,
-            topP: 0.8,
-            maxOutputTokens: 4096,
+            temperature: 0.4,
+            topK: 40,
+            topP: 0.95,
+            maxOutputTokens: 8192,
           },
         }),
       });
 
       if (!response.ok) {
-        throw new Error('Failed to generate notes');
+        const errorData = await response.json();
+        throw new Error(errorData.error?.message || 'Failed to generate notes');
       }
 
       const data = await response.json();
@@ -356,13 +576,21 @@ Format as clean, readable plain text suitable for students.`;
           .map(part => part.text)
           .join('\n');
         
-        return formatNotesContent(textParts);
+        const formattedNotes = formatNotesContent(textParts);
+        
+        // Ensure we have meaningful content
+        if (formattedNotes.length < 50) {
+          throw new Error('Generated notes are too short');
+        }
+        
+        return formattedNotes;
       }
       
-      return contentText;
+      throw new Error('No content generated');
     } catch (error) {
       console.error('Error processing material:', error);
-      return `${material.title}\n\n${material.description || 'Failed to process content'}`;
+      // Return a fallback with the original content
+      return `${material.title}\n\n${material.description || ''}\n\nNote: AI processing encountered an error. Original content preserved.`;
     }
   };
 
@@ -397,58 +625,122 @@ Format as clean, readable plain text suitable for students.`;
 
     setIsFetching(true);
     const materialsToProcess = courseMaterials.filter(m => selectedMaterials.includes(m.id));
-
-    try {
-      for (let i = 0; i < materialsToProcess.length; i++) {
-        const material = materialsToProcess[i];
-        setProcessingProgress(`Processing ${i + 1} of ${materialsToProcess.length}: ${material.title}`);
-
-        const notesContent = await processMaterialWithAI(material);
-
-        // Save to Firebase
-        await addDoc(collection(db, 'recordings'), {
-          userId: currentUser.uid,
-          title: material.title,
-          transcription: notesContent,
-          organizedNotes: {
-            title: material.title,
-            content: notesContent,
-            aiProvider: 'gemini',
-            sections: [],
-          },
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
-          source: 'google_classroom',
-          classroomCourseId: selectedCourse?.id,
-          classroomCourseName: selectedCourse?.name,
-          classroomMaterialType: material.type,
-          status: 'completed',
-        });
-
-        console.log(`✅ Saved: ${material.title}`);
-      }
-
+    
+    // Filter out already imported materials
+    const newMaterials = materialsToProcess.filter(m => !importedMaterials.has(m.id));
+    
+    if (newMaterials.length === 0) {
+      setIsFetching(false);
       Alert.alert(
-        'Success! 🎉',
-        `${materialsToProcess.length} materials imported successfully!`,
+        'Already Imported',
+        'All selected materials have already been imported to your notes.',
+        [{ text: 'OK' }]
+      );
+      return;
+    }
+
+    if (newMaterials.length < materialsToProcess.length) {
+      const alreadyImported = materialsToProcess.length - newMaterials.length;
+      Alert.alert(
+        'Some Materials Skipped',
+        `${alreadyImported} material(s) have already been imported and will be skipped. ${newMaterials.length} new material(s) will be imported.`,
         [
-          {
-            text: 'View Notes',
-            onPress: () => {
-              navigation.navigate('Notes');
-              resetState();
-            }
-          },
-          {
-            text: 'Import More',
-            onPress: () => {
-              setShowMaterialsModal(false);
-              setShowCourseModal(true);
-              resetState();
-            }
-          }
+          { text: 'Cancel', style: 'cancel', onPress: () => setIsFetching(false) },
+          { text: 'Continue', onPress: () => processNewMaterials(newMaterials, currentUser) }
         ]
       );
+    } else {
+      processNewMaterials(newMaterials, currentUser);
+    }
+  };
+
+  // Process new materials helper function
+  const processNewMaterials = async (materials, currentUser) => {
+    const successfulImports = [];
+    const failedImports = [];
+
+    try {
+      for (let i = 0; i < materials.length; i++) {
+        const material = materials[i];
+        setProcessingProgress(`Processing ${i + 1} of ${materials.length}: ${material.title}`);
+
+        try {
+          // Process with AI
+          const notesContent = await processMaterialWithAI(material);
+
+          // Verify content quality
+          if (!notesContent || notesContent.length < 50) {
+            throw new Error('Generated content is too short or empty');
+          }
+
+          // Save to Firebase
+          await addDoc(collection(db, 'recordings'), {
+            userId: currentUser.uid,
+            title: material.title,
+            transcription: notesContent,
+            organizedNotes: {
+              title: material.title,
+              content: notesContent,
+              aiProvider: 'gemini',
+              sections: [],
+            },
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+            source: 'google_classroom',
+            classroomCourseId: selectedCourse?.id,
+            classroomCourseName: selectedCourse?.name,
+            classroomMaterialType: material.type,
+            classroomMaterialId: material.id, // Store material ID for duplicate detection
+            status: 'completed',
+          });
+
+          // Add to imported set
+          setImportedMaterials(prev => new Set([...prev, material.id]));
+          successfulImports.push(material.title);
+          
+          console.log(`✅ Saved: ${material.title}`);
+        } catch (materialError) {
+          console.error(`Failed to process ${material.title}:`, materialError);
+          failedImports.push(material.title);
+        }
+      }
+
+      // Show results
+      if (successfulImports.length > 0) {
+        let message = `${successfulImports.length} material(s) imported successfully!`;
+        
+        if (failedImports.length > 0) {
+          message += `\n\n${failedImports.length} material(s) failed to import.`;
+        }
+
+        Alert.alert(
+          failedImports.length > 0 ? 'Partially Complete' : 'Success! 🎉',
+          message,
+          [
+            {
+              text: 'View Notes',
+              onPress: () => {
+                navigation.navigate('Notesscreen');
+                resetState();
+              }
+            },
+            {
+              text: 'Import More',
+              onPress: () => {
+                setShowMaterialsModal(false);
+                setShowCourseModal(true);
+                resetState();
+              }
+            }
+          ]
+        );
+      } else {
+        Alert.alert(
+          'Import Failed',
+          'Failed to import any materials. Please try again.',
+          [{ text: 'OK' }]
+        );
+      }
     } catch (error) {
       console.error('Processing error:', error);
       Alert.alert('Error', `Failed to process materials: ${error.message}`);
@@ -468,33 +760,88 @@ Format as clean, readable plain text suitable for students.`;
   // Disconnect Google Classroom
   const handleDisconnect = () => {
     Alert.alert(
-      'Disconnect',
-      'Are you sure you want to disconnect from Google Classroom?',
+      'Disconnect from Google Classroom',
+      'This will remove your Google Classroom connection. Your imported notes will remain saved. You can reconnect anytime.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
           text: 'Disconnect',
           style: 'destructive',
-          onPress: () => {
-            setIsAuthenticated(false);
-            setAccessToken(null);
-            setCourses([]);
-            setUserEmail("");
-            resetState();
+          onPress: async () => {
+            try {
+              // Remove from Firebase
+              await removeAuthFromFirebase();
+              
+              // Clear local state
+              setIsAuthenticated(false);
+              setAccessToken(null);
+              setCourses([]);
+              setUserEmail("");
+              setImportedMaterials(new Set());
+              resetState();
+              
+              Alert.alert(
+                'Disconnected',
+                'Successfully disconnected from Google Classroom.',
+                [{ text: 'OK' }]
+              );
+            } catch (error) {
+              console.error('Error disconnecting:', error);
+              Alert.alert('Error', 'Failed to disconnect. Please try again.');
+            }
           }
         }
       ]
     );
   };
 
+  // Display redirect URI info
+  const displayRedirectInfo = () => {
+    return (
+      <View style={styles.redirectInfoBox}>
+        <Text style={styles.redirectInfoTitle}>🔧 OAuth Setup Instructions</Text>
+        <Text style={styles.redirectInfoText}>
+          Platform: {Platform.OS}
+        </Text>
+        <Text style={styles.redirectInfoText}>
+          Add this redirect URI to Google Cloud Console:
+        </Text>
+        <View style={styles.redirectUriContainer}>
+          <Text style={styles.redirectUri} selectable>
+            {redirectUri}
+          </Text>
+        </View>
+        <Text style={styles.redirectInfoSteps}>
+          Setup Steps:{'\n'}
+          1. Go to: console.cloud.google.com{'\n'}
+          2. Select your project{'\n'}
+          3. APIs & Services → Credentials{'\n'}
+          4. Click your OAuth 2.0 Client ID{'\n'}
+          5. Under "Authorized redirect URIs", click ADD URI{'\n'}
+          6. Paste the URI above{'\n'}
+          7. Click SAVE{'\n'}
+          8. Wait 1-2 minutes for changes to propagate{'\n\n'}
+          
+          ⚠️ IMPORTANT:{'\n'}
+          - Application type: "Web application"{'\n'}
+          - NOT "Android" or "iOS"{'\n'}
+          - Use EXACT URI (no trailing spaces){'\n'}
+          - Enable Google Classroom API & Drive API
+        </Text>
+      </View>
+    );
+  };
+
   return (
-    <View style={[styles.container, { backgroundColor: colors.background }] }>
+    <View style={[styles.container, { backgroundColor: colors.background }]}>
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
         {/* Header */}
         <View style={styles.header}>
           <MaterialIcons name="school" size={48} color={colors.primary} />
           <Text style={[styles.title, { color: colors.text }]}>Google Classroom Sync 📚</Text>
-          <Text style={[styles.description, { color: colors.subtext }]}>Connect your Google Classroom and import course materials as organized study notes.</Text>
+          <Text style={[styles.description, { color: colors.subtext }]}>
+            Connect your Google Classroom and import course materials as organized study notes.
+          </Text>
         </View>
         <BackButton />
 
@@ -502,14 +849,6 @@ Format as clean, readable plain text suitable for students.`;
         {!isAuthenticated ? (
           <View style={styles.authSection}>
             <View style={styles.featureList}>
-              <View style={styles.featureItem}>
-                <MaterialIcons name="check-circle" size={20} color="#10b981" />
-                <Text style={styles.featureText}>Access all your courses</Text>
-              </View>
-              <View style={styles.featureItem}>
-                <MaterialIcons name="check-circle" size={20} color="#10b981" />
-                <Text style={styles.featureText}>Import assignments & materials</Text>
-              </View>
               <View style={styles.featureItem}>
                 <MaterialIcons name="check-circle" size={20} color="#10b981" />
                 <Text style={styles.featureText}>AI-powered note generation</Text>
@@ -523,13 +862,15 @@ Format as clean, readable plain text suitable for students.`;
             <TouchableOpacity
               style={styles.connectButton}
               onPress={() => promptAsync()}
-              disabled={!request}
+              disabled={!request || isLoading}
             >
               <Image
                 source={{ uri: 'https://www.google.com/images/branding/googleg/1x/googleg_standard_color_128dp.png' }}
                 style={styles.googleIcon}
               />
-              <Text style={styles.connectButtonText}>Connect with Google Classroom</Text>
+              <Text style={styles.connectButtonText}>
+                {isLoading ? 'Connecting...' : 'Connect with Google Classroom'}
+              </Text>
             </TouchableOpacity>
 
             {/* Debug Info - Show Redirect URI */}
@@ -537,41 +878,13 @@ Format as clean, readable plain text suitable for students.`;
               style={styles.debugButton}
               onPress={() => setShowRedirectInfo(!showRedirectInfo)}
             >
-              {/* <MaterialIcons name="info-outline" size={16} color="#6b7280" /> */}
-              {/* <Text style={styles.debugButtonText}>
+              <MaterialIcons name="info-outline" size={16} color="#6b7280" />
+              <Text style={styles.debugButtonText}>
                 {showRedirectInfo ? 'Hide' : 'Show'} Setup Instructions
-              </Text> */}
+              </Text>
             </TouchableOpacity>
 
-            {showRedirectInfo && (
-              <View style={styles.redirectInfoBox}>
-                <Text style={styles.redirectInfoTitle}>🔧 OAuth Setup Required</Text>
-                <Text style={styles.redirectInfoText}>
-                  Add this EXACT redirect URI to your Google Cloud Console:
-                </Text>
-                <View style={styles.redirectUriContainer}>
-                  <Text style={styles.redirectUri} selectable>
-                    https://auth.expo.io/@mande/notetedd
-                  </Text>
-                </View>
-                <Text style={styles.redirectInfoSteps}>
-                  Steps:{'\n'}
-                  1. Go to: console.cloud.google.com{'\n'}
-                  2. Select your project{'\n'}
-                  3. APIs & Services → Credentials{'\n'}
-                  4. Click your OAuth 2.0 Client ID{'\n'}
-                  5. Under "Authorized redirect URIs", click ADD URI{'\n'}
-                  6. Paste: https://auth.expo.io/@mande/notetedd{'\n'}
-                  7. Click SAVE and wait 1-2 minutes{'\n'}
-                  8. Try connecting again{'\n\n'}
-                  
-                  ⚠️ IMPORTANT:{'\n'}
-                  - Use EXACT URI above (no spaces){'\n'}
-                  - Application type must be "Web application"{'\n'}
-                  - Not "Android" or "iOS"
-                </Text>
-              </View>
-            )}
+            {showRedirectInfo && displayRedirectInfo()}
 
             <View style={styles.privacyNote}>
               <MaterialIcons name="lock" size={16} color="#6b7280" />
@@ -715,47 +1028,65 @@ Format as clean, readable plain text suitable for students.`;
           <FlatList
             data={courseMaterials}
             keyExtractor={(item) => item.id}
-            renderItem={({ item }) => (
-              <TouchableOpacity
-                style={[
-                  styles.materialCard,
-                  selectedMaterials.includes(item.id) && styles.materialCardSelected
-                ]}
-                onPress={() => toggleMaterialSelection(item.id)}
-              >
-                <View style={styles.materialHeader}>
-                  <View style={[
-                    styles.materialIcon,
-                    { backgroundColor: item.type === 'assignment' ? '#ef4444' : item.type === 'announcement' ? '#3b82f6' : '#10b981' }
-                  ]}>
-                    <MaterialIcons
-                      name={item.type === 'assignment' ? 'assignment' : item.type === 'announcement' ? 'campaign' : 'article'}
-                      size={20}
-                      color="#fff"
-                    />
-                  </View>
-                  <View style={styles.materialInfo}>
-                    <Text style={styles.materialTitle}>{item.title}</Text>
-                    <Text style={styles.materialType}>
-                      {item.type.charAt(0).toUpperCase() + item.type.slice(1)}
-                      {item.materials?.length > 0 && ` • ${item.materials.length} attachment(s)`}
-                    </Text>
-                    {item.description && (
-                      <Text style={styles.materialDescription} numberOfLines={2}>
-                        {item.description}
+            renderItem={({ item }) => {
+              const isImported = importedMaterials.has(item.id);
+              
+              return (
+                <TouchableOpacity
+                  style={[
+                    styles.materialCard,
+                    selectedMaterials.includes(item.id) && styles.materialCardSelected,
+                    isImported && styles.materialCardImported
+                  ]}
+                  onPress={() => !isImported && toggleMaterialSelection(item.id)}
+                  disabled={isImported}
+                >
+                  <View style={styles.materialHeader}>
+                    <View style={[
+                      styles.materialIcon,
+                      { backgroundColor: item.type === 'assignment' ? '#ef4444' : item.type === 'announcement' ? '#3b82f6' : '#10b981' }
+                    ]}>
+                      <MaterialIcons
+                        name={item.type === 'assignment' ? 'assignment' : item.type === 'announcement' ? 'campaign' : 'article'}
+                        size={20}
+                        color="#fff"
+                      />
+                    </View>
+                    <View style={styles.materialInfo}>
+                      <View style={styles.materialTitleRow}>
+                        <Text style={[styles.materialTitle, isImported && styles.materialTitleImported]}>
+                          {item.title}
+                        </Text>
+                        {isImported && (
+                          <View style={styles.importedBadge}>
+                            <MaterialIcons name="check-circle" size={16} color="#10b981" />
+                            <Text style={styles.importedBadgeText}>Imported</Text>
+                          </View>
+                        )}
+                      </View>
+                      <Text style={styles.materialType}>
+                        {item.type.charAt(0).toUpperCase() + item.type.slice(1)}
+                        {item.materials?.length > 0 && ` • ${item.materials.length} attachment(s)`}
                       </Text>
+                      {item.description && (
+                        <Text style={styles.materialDescription} numberOfLines={2}>
+                          {item.description}
+                        </Text>
+                      )}
+                    </View>
+                  </View>
+                  <View style={styles.checkboxContainer}>
+                    {isImported ? (
+                      <MaterialIcons name="check-circle" size={24} color="#10b981" />
+                    ) : selectedMaterials.includes(item.id) ? (
+                      <MaterialIcons name="check-box" size={24} color="#7c3aed" />
+                    ) : (
+                      <MaterialIcons name="check-box-outline-blank" size={24} color="#d1d5db" />
                     )}
                   </View>
-                </View>
-                <View style={styles.checkboxContainer}>
-                  {selectedMaterials.includes(item.id) ? (
-                    <MaterialIcons name="check-box" size={24} color="#7c3aed" />
-                  ) : (
-                    <MaterialIcons name="check-box-outline-blank" size={24} color="#d1d5db" />
-                  )}
-                </View>
-              </TouchableOpacity>
-            )}
+                </TouchableOpacity>
+              );
+            }}
             style={styles.materialsList}
           />
 
@@ -773,11 +1104,11 @@ Format as clean, readable plain text suitable for students.`;
                 selectedMaterials.length === 0 && styles.modalButtonDisabled
               ]}
               onPress={processAndSaveMaterials}
-              disabled={selectedMaterials.length === 0}
+              disabled={selectedMaterials.length === 0 || isFetching}
             >
               <MaterialIcons name="download" size={20} color="#fff" />
               <Text style={styles.modalButtonTextPrimary}>
-                Import ({selectedMaterials.length})
+                {isFetching ? 'Processing...' : `Import (${selectedMaterials.length})`}
               </Text>
             </TouchableOpacity>
           </View>
@@ -1176,6 +1507,11 @@ const styles = StyleSheet.create({
     borderColor: "#7c3aed",
     backgroundColor: "#f5f3ff",
   },
+  materialCardImported: {
+    backgroundColor: "#f0fdf4",
+    borderColor: "#86efac",
+    opacity: 0.7,
+  },
   materialHeader: {
     flexDirection: "row",
     alignItems: "center",
@@ -1192,11 +1528,35 @@ const styles = StyleSheet.create({
   materialInfo: {
     flex: 1,
   },
+  materialTitleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 4,
+    flexWrap: "wrap",
+  },
   materialTitle: {
     fontSize: 14,
     fontWeight: "600",
     color: "#111827",
-    marginBottom: 4,
+    marginRight: 8,
+    flex: 1,
+  },
+  materialTitleImported: {
+    color: "#6b7280",
+  },
+  importedBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#d1fae5",
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 12,
+  },
+  importedBadgeText: {
+    fontSize: 10,
+    fontWeight: "600",
+    color: "#059669",
+    marginLeft: 4,
   },
   materialType: {
     fontSize: 12,

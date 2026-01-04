@@ -57,7 +57,7 @@ const OnboardingScreen = () => {
       id: '1',
       title: 'Record & Transcribe',
       subtitle: 'Never Miss a Beat',
-      description: 'Transform lectures into text instantly. Speak, and watch your notes write themselves.',
+      description: 'Transform lectures into text instantly. Sit, and watch your notes write themselves.',
       accentColor: '#e67e22',
       imageEmoji: '🎙️',
       decorEmojis: ['🎵', '📝', '✨'],
@@ -71,13 +71,13 @@ const OnboardingScreen = () => {
       accentColor: '#9B5DE5',
       imageEmoji: '📚',
       decorEmojis: ['🗂️', '🔍', '⚡'],
-      features: ['Auto-folders', 'Power search', 'Custom tags']
+      features: ['Diagrams/Calculations', 'Power search', 'Custom tags']
     },
     {
       id: '3',
       title: 'AI-Powered Brain',
       subtitle: 'Study Like a Pro',
-      description: 'Get summaries, flashcards, and study guides created automatically. Let AI do the heavy lifting.',
+      description: 'Get summaries, flashcards, and study guides created automatically. Let Tedd do the heavy lifting.',
       accentColor: '#e67e22',
       imageEmoji: '🧠',
       decorEmojis: ['💡', '🎯', '🚀'],
@@ -98,13 +98,44 @@ const OnboardingScreen = () => {
   const handleNext = () => {
     if (currentIndex < slides.length - 1) {
       const nextIndex = currentIndex + 1;
-      flatListRef.current?.scrollToIndex({ index: nextIndex, animated: true });
+      
+      // Use scrollTo for better web compatibility
+      if (Platform.OS === 'web') {
+        flatListRef.current?.scrollToOffset({ 
+          offset: nextIndex * width, 
+          animated: true 
+        });
+      } else {
+        flatListRef.current?.scrollToIndex({ 
+          index: nextIndex, 
+          animated: true 
+        });
+      }
+      
       setCurrentIndex(nextIndex);
     }
   };
 
-  const handleGetStarted = () => {
+  const handleSkip = () => {
+    const lastIndex = slides.length - 1;
     
+    // Use scrollTo for better web compatibility
+    if (Platform.OS === 'web') {
+      flatListRef.current?.scrollToOffset({ 
+        offset: lastIndex * width, 
+        animated: true 
+      });
+    } else {
+      flatListRef.current?.scrollToIndex({ 
+        index: lastIndex, 
+        animated: true 
+      });
+    }
+    
+    setCurrentIndex(lastIndex);
+  };
+
+  const handleGetStarted = () => {
     router.push('AuthScreen');
   };
 
@@ -258,6 +289,12 @@ const OnboardingScreen = () => {
             setCurrentIndex(index);
           }}
           scrollEventThrottle={16}
+          // Additional props for better web support
+          getItemLayout={(data, index) => ({
+            length: width,
+            offset: width * index,
+            index,
+          })}
         />
       </View>
 
@@ -270,13 +307,7 @@ const OnboardingScreen = () => {
           <View style={styles.buttonRow}>
             <TouchableOpacity 
               style={styles.skipButton}
-              onPress={() => {
-                flatListRef.current?.scrollToIndex({ 
-                  index: slides.length - 1, 
-                  animated: true 
-                });
-                setCurrentIndex(slides.length - 1);
-              }}
+              onPress={handleSkip}
               activeOpacity={0.7}
             >
               <Text style={styles.skipText}>Skip</Text>
