@@ -1,11 +1,14 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { View, Modal, Alert, StyleSheet, Platform } from 'react-native';
 import TeddManager from '../../app/services/Tedd/TeddManager';
 import TeddFloatingButton from './TeddFloatingButton';
 import TeddChatInterface from './TeddChatInterface';
 import TeddPermissionPrompt from './TeddPermissionPrompt';
 import DataService from '../../app/services/Tedd/DataService';
-import { app } from '../../firebaseConfig'; 
+import TeddSpeechService from '../../app/services/Tedd/TeddSpeechService';
+import VoiceService from '../../app/services/Tedd/VoiceService'; // Your existing VoiceService
+import { app } from '../../firebaseConfig'; // Your Firebase config
+import { getAuth } from 'firebase/auth';
 
 const TeddComponent = ({
   userId,
@@ -17,6 +20,7 @@ const TeddComponent = ({
 }) => {
   const [teddManager, setTeddManager] = useState(null);
   const [dataService, setDataService] = useState(null);
+  const [speechService, setSpeechService] = useState(null);
   const [teddState, setTeddState] = useState('idle');
   const [conversationMode, setConversationMode] = useState('text');
   const [messages, setMessages] = useState([]);
@@ -28,6 +32,8 @@ const TeddComponent = ({
   const [hasPermission, setHasPermission] = useState(false);
   const [needsPermission, setNeedsPermission] = useState(false);
   const [initError, setInitError] = useState(null);
+  const [isSpeaking, setIsSpeaking] = useState(false);
+  const lastMessageIdSpoken = useRef(null);
 
   // Initialize DataService and TeddManager
   useEffect(() => {
@@ -72,6 +78,9 @@ const TeddComponent = ({
       if (manager) {
         manager.cleanup().catch(console.error);
       }
+      if (speech) {
+        speech.stop().catch(console.error);
+      }
     };
   }, [userId, geminiApiKey]);
 
@@ -109,7 +118,7 @@ const TeddComponent = ({
     }
   };
 
-  const initializeTedd = async (manager) => {
+  const initializeTedd = async (manager, speechServiceInstance) => {
     try {
       console.log('[TeddComponent] Initializing Tedd...');
       
@@ -168,13 +177,41 @@ const TeddComponent = ({
       }
 
       // Add welcome message from Tedd
+      const auth = getAuth();
+      const userName = auth.currentUser?.displayName?.split(' ')[0] || 'there';
+      
       const welcomeMessage = {
         id: `welcome-${Date.now()}`,
         role: 'assistant',
-        content: "Hey! I'm Tedd, your study assistant. I can help you manage your notes, track your progress, check assignments, and navigate the app. What would you like to work on?",
+        content: `Hey ${userName}! I'm Tedd, your study assistant. I can help you manage your notes, track your progress, check assignments, and navigate the app. What would you like to work on?`,
         timestamp: new Date(),
       };
       setMessages(prev => [...prev, welcomeMessage]);
+
+      // Set up continuous conversation callback using VoiceService
+      VoiceService.setOnSpeechDoneCallback(() => {
+        console.log('[TeddComponent] Speech done, restarting listening...');
+        if (conversationMode === 'speech' && manager && !isSpeaking) {
+          manager.startActiveListening().catch(err => {
+            console.log('[TeddComponent] Could not restart listening:', err.message);
+          });
+        }
+      });
+
+      // Speak welcome message if in speech mode
+      if (result.speechAvailable && result.hasPermission) {
+        setTimeout(() => {
+          const welcomeText = `Hey ${userName}! I'm Tedd, your study assistant. How can I help you today?`;
+          
+          // Use VoiceService for native compatibility
+          VoiceService.speak(
+            welcomeText,
+            () => setIsSpeaking(true),
+            () => setIsSpeaking(false),
+            (err) => console.error('[TeddComponent] Speech error:', err)
+          );
+        }, 500);
+      }
 
     } catch (error) {
       console.error('[TeddComponent] Failed to initialize:', error);
@@ -198,14 +235,48 @@ const TeddComponent = ({
     // Clear interim transcript
     setInterimTranscript('');
     
+    // Clean message object - remove undefined values for Firebase
+    const cleanMessage = {
+      id: message.id,
+      role: message.role,
+      content: message.content,
+      timestamp: message.timestamp || new Date(),
+    };
+    
+    // Only add optional fields if they're defined
+    if (message.isVoiceInput !== undefined) cleanMessage.isVoiceInput = message.isVoiceInput;
+    if (message.shouldSpeak !== undefined) cleanMessage.shouldSpeak = message.shouldSpeak;
+    if (message.metadata) cleanMessage.metadata = message.metadata;
+    
     // Add message to history
     setMessages(prev => {
       // Avoid duplicates
-      const exists = prev.some(m => m.id === message.id);
+      const exists = prev.some(m => m.id === cleanMessage.id);
       if (exists) return prev;
-      return [...prev, message];
+      
+      const newMessages = [...prev, cleanMessage];
+      
+      // Speak assistant messages if in speech mode and not already spoken
+      if (cleanMessage.role === 'assistant' && 
+          conversationMode === 'speech' && 
+          lastMessageIdSpoken.current !== cleanMessage.id) {
+        
+        lastMessageIdSpoken.current = cleanMessage.id;
+        
+        // Use VoiceService to speak (it will handle continuous conversation)
+        setTimeout(() => {
+          VoiceService.speak(
+            cleanMessage.content,
+            () => setIsSpeaking(true),
+            () => setIsSpeaking(false),
+            (err) => console.error('[TeddComponent] Speech error:', err)
+          );
+        }, 300);
+      }
+      
+      return newMessages;
     });
-  }, []);
+  }, [conversationMode]);
 
   const handleError = useCallback((error) => {
     console.error('[TeddComponent] Error:', error);
@@ -406,9 +477,20 @@ const TeddComponent = ({
   };
 
   const handleStopSpeaking = () => {
+    // Use VoiceService to stop speaking
+    VoiceService.stopSpeaking().catch(error => {
+      console.error('[TeddComponent] Error stopping speech:', error);
+    });
+    
+    if (speechService) {
+      speechService.stop().catch(error => {
+        console.error('[TeddComponent] Error stopping TTS service:', error);
+      });
+    }
+    
     if (teddManager) {
       teddManager.stopSpeaking().catch(error => {
-        console.error('[TeddComponent] Error stopping speaking:', error);
+        console.error('[TeddComponent] Error stopping TTS:', error);
       });
     }
   };

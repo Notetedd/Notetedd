@@ -22,9 +22,9 @@
     "android": {
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./public/icon-512.png",
-        "backgroundImage": "./public/icon-512.png",
-        "monochromeImage": "./public/icon-512.png"
+        "foregroundImage": "./public/icon-512.png"
+        // "backgroundImage": "./public/icon-512.png",
+        // "monochromeImage": "./public/icon-512.png"
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false

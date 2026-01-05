@@ -34,11 +34,6 @@ CRITICAL IDENTITY RULES:
 - You are an integrated part of the Notetedd app with full access to user data
 - You can see their notes, recordings, study stats, Google Classroom data, and more
 - When users ask about their data, proactively fetch and analyze it for them
--the name of the engineer who created you is Engineer Joe Monday
--You can be used by any college, university or other scholars to their study needs
--Users can access you through the Notetedd app on their mobile devices or web browsers
--Users can interact with you via text or voice commands within the app
--You can find refferences of the study content they are currently revising or reading online and share with them only if they request
 
 YOUR PERSONALITY:
 - Warm, encouraging, and supportive study companion
@@ -282,7 +277,7 @@ Remember: You're not just answering questions - you're an active study partner t
     return messages;
   }
 
-  // Enhanced send message with data integration
+  // Enhanced send message with data integration and speech awareness
   async sendMessage(userMessage, context, onStream) {
     try {
       // Add user message to history
@@ -291,6 +286,7 @@ Remember: You're not just answering questions - you're an active study partner t
         role: 'user',
         content: userMessage,
         timestamp: new Date(),
+        isVoiceInput: context?.isVoiceInput || false, // Track if from voice
       };
       this.conversationHistory.push(userMsg);
 
@@ -311,13 +307,18 @@ Remember: You're not just answering questions - you're an active study partner t
         const dataContext = this.formatDataForPrompt(dataRequest, fetchedData);
         messages[messages.length - 1].parts[0].text += `\n\n${dataContext}`;
       }
+
+      // Add instruction for voice responses if this is a voice conversation
+      if (context?.conversationMode === 'speech' || context?.isVoiceInput) {
+        messages[messages.length - 1].parts[0].text += `\n\n[IMPORTANT: The user is using VOICE input. Keep your response BRIEF and CONVERSATIONAL (2-3 sentences max). Speak naturally as if having a conversation. No markdown, no lists, no emojis. Just natural speech.]`;
+      }
       
       // Prepare request body
       const requestBody = {
         contents: messages,
         generationConfig: {
           temperature: this.temperature,
-          maxOutputTokens: this.maxTokens,
+          maxOutputTokens: context?.conversationMode === 'speech' ? 150 : this.maxTokens,
           topP: 0.95,
           topK: 40,
         },
@@ -341,8 +342,13 @@ Remember: You're not just answering questions - you're an active study partner t
       const data = await response.json();
       
       // Extract response text
-      const fullResponse = data.candidates?.[0]?.content?.parts?.[0]?.text || 
+      let fullResponse = data.candidates?.[0]?.content?.parts?.[0]?.text || 
                           "I'm having trouble processing that right now. Could you try rephrasing?";
+
+      // Clean response for voice if needed
+      if (context?.conversationMode === 'speech' || context?.isVoiceInput) {
+        fullResponse = this.cleanResponseForVoice(fullResponse);
+      }
 
       // Call onStream if provided
       if (onStream) {
@@ -355,6 +361,7 @@ Remember: You're not just answering questions - you're an active study partner t
         role: 'assistant',
         content: fullResponse,
         timestamp: new Date(),
+        shouldSpeak: context?.conversationMode === 'speech' || context?.isVoiceInput,
         metadata: {
           dataFetched: fetchedData,
           dataRequest: dataRequest,
@@ -375,6 +382,33 @@ Remember: You're not just answering questions - you're an active study partner t
         throw new Error('I ran into an issue. Please try again in a moment.');
       }
     }
+  }
+
+  // Clean response for voice output
+  cleanResponseForVoice(text) {
+    let cleaned = text;
+    
+    // Remove markdown
+    cleaned = cleaned.replace(/\*\*([^*]+)\*\*/g, '$1'); // Bold
+    cleaned = cleaned.replace(/\*([^*]+)\*/g, '$1'); // Italic
+    cleaned = cleaned.replace(/`([^`]+)`/g, '$1'); // Code
+    cleaned = cleaned.replace(/#{1,6}\s/g, ''); // Headers
+    
+    // Remove bullet points and numbers
+    cleaned = cleaned.replace(/^\s*[-*•]\s/gm, '');
+    cleaned = cleaned.replace(/^\s*\d+\.\s/gm, '');
+    
+    // Replace emojis with text equivalents or remove
+    cleaned = cleaned.replace(/🎉/g, '');
+    cleaned = cleaned.replace(/📊/g, '');
+    cleaned = cleaned.replace(/📝/g, '');
+    cleaned = cleaned.replace(/😊/g, '');
+    cleaned = cleaned.replace(/👍/g, '');
+    
+    // Clean up extra whitespace
+    cleaned = cleaned.replace(/\s+/g, ' ').trim();
+    
+    return cleaned;
   }
 
   // Format fetched data for the prompt

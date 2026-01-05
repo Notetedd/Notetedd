@@ -42,6 +42,7 @@ class TeddFirebaseService {
         lastUpdated: new Date(),
         messageCount: messages.length,
       };
+      
 
       await setDoc(conversationRef, {
         ...conversationData,
@@ -148,6 +149,9 @@ class TeddFirebaseService {
         this.voiceRecordingsCollection, 
         recordingId
       );
+// Check what data is being saved
+console.log("Data being sent to Firebase:", dataToSave);
+await setDoc(docRef, dataToSave);
 
       await setDoc(recordingRef, {
         ...recording,
