@@ -24,7 +24,6 @@ import BackButton from "../components/Backbutton";
 // Firebase imports
 import { db, auth } from '../firebaseConfig';
 import { collection, addDoc, getDocs, updateDoc, doc, query, where, serverTimestamp } from 'firebase/firestore';
-import { AlignLeft } from "react-native-vector-icons/MaterialCommunityIcons";
 
 export default function UploadPDFScreen({ navigation }) {
   const [uploads, setUploads] = useState([]);
@@ -41,7 +40,7 @@ export default function UploadPDFScreen({ navigation }) {
 
   // Gemini API Configuration
   const GEMINI_API_KEY = "AIzaSyCZVQqMteS8jSA_cAYOUS0XxzwHxzgIaNI";
-  const GEMINI_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent";
+  const GEMINI_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent";
 
   // Web-specific file upload handler
   const handleWebFileUpload = (event) => {
@@ -113,8 +112,9 @@ export default function UploadPDFScreen({ navigation }) {
   const pickDocuments = async () => {
     try {
       const result = await DocumentPicker.getDocumentAsync({
-        type: ["application/pdf", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"],
+        type: ["application/pdf", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "image/*", "application/docx"],
         multiple: true,
+        copyToCacheDirectory: true,
       });
 
       if (result.type === "success" || result.assets) {
@@ -139,43 +139,73 @@ export default function UploadPDFScreen({ navigation }) {
     setUploads(uploads.filter((item) => item.id !== id));
   };
 
-  // Convert file to base64 - Cross-platform solution
+  // FIXED: Convert file to base64 - Cross-platform solution without deprecated APIs
   const fileToBase64 = async (uri, webFile = null) => {
     try {
+      console.log("Converting to base64:", uri);
+      
       if (Platform.OS === "web") {
         if (webFile) {
           return new Promise((resolve, reject) => {
             const reader = new FileReader();
-            reader.onloadend = () => {
-              const base64 = reader.result.split(',')[1];
-              resolve(base64);
-            };
+            reader.onloadend = () => resolve(reader.result.split(',')[1]);
             reader.onerror = reject;
             reader.readAsDataURL(webFile);
           });
         } else {
           const response = await fetch(uri);
           const blob = await response.blob();
-          
           return new Promise((resolve, reject) => {
             const reader = new FileReader();
-            reader.onloadend = () => {
-              const base64 = reader.result.split(',')[1];
-              resolve(base64);
-            };
+            reader.onloadend = () => resolve(reader.result.split(',')[1]);
             reader.onerror = reject;
             reader.readAsDataURL(blob);
           });
         }
       } else {
-        const base64 = await FileSystem.readAsStringAsync(uri, {
-          encoding: FileSystem.EncodingType.Base64,
-        });
-        return base64;
+        // Mobile platform
+        try {
+          // Try direct base64 conversion first
+          const base64 = await FileSystem.readAsStringAsync(uri, {
+            encoding: FileSystem.EncodingType.Base64,
+          });
+          
+          if (!base64 || base64.length === 0) {
+            throw new Error("Conversion resulted in empty string");
+          }
+          
+          console.log("✅ Successfully converted to base64");
+          return base64;
+        } catch (fsError) {
+          console.error("Direct read failed, trying fetch method:", fsError);
+          
+          // Fallback: Use fetch to read the file (works for content:// URIs on Android)
+          try {
+            const response = await fetch(uri);
+            const blob = await response.blob();
+            
+            return new Promise((resolve, reject) => {
+              const reader = new FileReader();
+              reader.onloadend = () => {
+                const base64 = reader.result.split(',')[1];
+                console.log("✅ Converted via fetch method");
+                resolve(base64);
+              };
+              reader.onerror = (error) => {
+                console.error("FileReader error:", error);
+                reject(new Error("Failed to read file as base64"));
+              };
+              reader.readAsDataURL(blob);
+            });
+          } catch (fetchError) {
+            console.error("Fetch method also failed:", fetchError);
+            throw new Error("Unable to read file. Please try a different image or file format.");
+          }
+        }
       }
     } catch (error) {
-      console.error("Error converting to base64:", error);
-      return null;
+      console.error("fileToBase64 error:", error);
+      throw new Error(`Could not convert file: ${error.message}`);
     }
   };
 
@@ -184,28 +214,44 @@ export default function UploadPDFScreen({ navigation }) {
     if (!rawContent) return "";
     
     let formatted = rawContent
-      // Remove excessive asterisks (bold/italic markers)
-      .replace(/\*\*\*([^*]+)\*\*\*/g, '$1')  // Bold + Italic
-      .replace(/\*\*([^*]+)\*\*/g, '$1')       // Bold
-      .replace(/\*([^*]+)\*/g, '$1')           // Italic
-      // Remove backticks
+      .replace(/\*\*\*([^*]+)\*\*\*/g, '$1')
+      .replace(/\*\*([^*]+)\*\*/g, '$1')
+      .replace(/\*([^*]+)\*/g, '$1')
       .replace(/`([^`]+)`/g, '$1')
-      // Clean up extra quotes
       .replace(/[""]([^""]+)["\"]/g, '$1')
-      // Clean up multiple newlines
       .replace(/\n{3,}/g, '\n\n')
-      // Trim whitespace
       .trim();
     
     return formatted;
   };
 
-  // Analyze image with Gemini AI
+  // ENHANCED: Analyze image with Gemini AI with proper MIME type detection
   const analyzeImage = async (file) => {
-    const base64 = await fileToBase64(file.uri, file.webFile);
-    if (!base64) throw new Error("Could not convert image to base64");
+    try {
+      console.log("Analyzing image:", file.name, file.type);
+      
+      const base64 = await fileToBase64(file.uri, file.webFile);
+      if (!base64) throw new Error("Could not convert image to base64");
 
-    const prompt = `You are an expert note-taking assistant. Analyze this image and extract the content.
+      // Determine correct MIME type
+      let mimeType = file.type;
+      if (!mimeType || mimeType === "image") {
+        const ext = file.name.toLowerCase().split('.').pop();
+        const mimeMap = {
+          'jpg': 'image/jpeg',
+          'jpeg': 'image/jpeg',
+          'png': 'image/png',
+          'gif': 'image/gif',
+          'webp': 'image/webp',
+          'heic': 'image/heic',
+          'heif': 'image/heif'
+        };
+        mimeType = mimeMap[ext] || 'image/jpeg';
+      }
+
+      console.log("Using MIME type:", mimeType);
+
+      const prompt = `You are an expert note-taking assistant. Analyze this image and extract ALL visible content.
 
 IMPORTANT FORMATTING RULES:
 - DO NOT use asterisks (*) for bold or italic
@@ -225,53 +271,57 @@ Extract and organize the content with:
 ONLY include sections that have actual content from the image.
 Format as clean, readable plain text suitable for students.`;
 
-    const response = await fetch(`${GEMINI_ENDPOINT}?key=${GEMINI_API_KEY}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [
-          {
-            parts: [
-              { text: prompt },
-              {
-                inline_data: {
-                  mime_type: file.type,
-                  data: base64,
+      const response = await fetch(`${GEMINI_ENDPOINT}?key=${GEMINI_API_KEY}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [
+            {
+              parts: [
+                { text: prompt },
+                {
+                  inline_data: {
+                    mime_type: mimeType,
+                    data: base64,
+                  },
                 },
-              },
-            ],
+              ],
+            },
+          ],
+          generationConfig: {
+            temperature: 0.3,
+            topK: 20,
+            topP: 0.8,
+            maxOutputTokens: 4096,
           },
-        ],
-        generationConfig: {
-          temperature: 0.3,
-          topK: 20,
-          topP: 0.8,
-          maxOutputTokens: 4096,
-        },
-      }),
-    });
+        }),
+      });
 
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      console.error("Gemini API error:", errorData);
-      throw new Error(`Gemini API error: ${errorData.error?.message || response.statusText}`);
-    }
-
-    const data = await response.json();
-    console.log("✅ Gemini response received");
-    
-    if (data.candidates && data.candidates.length > 0 && data.candidates[0].content) {
-      const textParts = data.candidates[0].content.parts
-        .filter(part => part.text)
-        .map(part => part.text)
-        .join('\n');
-      
-      if (textParts) {
-        return formatNotesContent(textParts);
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        console.error("Gemini API error:", errorData);
+        throw new Error(`Gemini API error: ${errorData.error?.message || response.statusText}`);
       }
+
+      const data = await response.json();
+      console.log("✅ Gemini response received");
+      
+      if (data.candidates && data.candidates.length > 0 && data.candidates[0].content) {
+        const textParts = data.candidates[0].content.parts
+          .filter(part => part.text)
+          .map(part => part.text)
+          .join('\n');
+        
+        if (textParts) {
+          return formatNotesContent(textParts);
+        }
+      }
+      
+      throw new Error("Gemini returned no content");
+    } catch (error) {
+      console.error("Image analysis error:", error);
+      throw error;
     }
-    
-    throw new Error("Gemini returned no content");
   };
 
   // Analyze document with Gemini AI
@@ -341,7 +391,6 @@ Format as clean, readable plain text.`;
 
       console.log("🔍 Checking for matching notes...");
       
-      // Fetch user's existing notes from recordings collection
       const recordingsRef = collection(db, 'recordings');
       const q = query(recordingsRef, where('userId', '==', currentUser.uid));
       const notesSnapshot = await getDocs(q);
@@ -355,18 +404,17 @@ Format as clean, readable plain text.`;
 
       console.log(`📚 Found ${existingNotes.length} existing notes`);
 
-      // Extract keywords from generated content for matching
       const keywords = generatedContent
         .toLowerCase()
-        .replace(/[^\w\s]/g, '') // Remove punctuation
+        .replace(/[^\w\s]/g, '')
         .split(/\s+/)
-        .filter(word => word.length > 4); // Only words longer than 4 chars
+        .filter(word => word.length > 4);
 
       const matches = existingNotes.filter((note) => {
         const noteContent = (note.title + " " + note.content).toLowerCase();
         const matchCount = keywords.filter(keyword => noteContent.includes(keyword)).length;
         const similarity = matchCount / Math.max(keywords.length, 1);
-        return similarity > 0.25; // 25% keyword overlap threshold
+        return similarity > 0.25;
       });
 
       console.log(`✨ Found ${matches.length} matching notes`);
@@ -377,7 +425,7 @@ Format as clean, readable plain text.`;
     }
   };
 
-  // Process all uploads
+  // ENHANCED: Process all uploads with better error handling
   const processUploads = async () => {
     if (uploads.length === 0) {
       Alert.alert("No Files", "Please upload at least one file.");
@@ -392,29 +440,58 @@ Format as clean, readable plain text.`;
 
     setIsProcessing(true);
     let allNotes = "";
+    let successCount = 0;
+    let failCount = 0;
 
     try {
       for (let i = 0; i < uploads.length; i++) {
         const file = uploads[i];
         setProcessingProgress(`Processing ${i + 1} of ${uploads.length}: ${file.name}`);
 
-        let notes;
-        if (file.type.includes("image")) {
-          notes = await analyzeImage(file);
-        } else if (file.type.includes("pdf") || file.type.includes("document")) {
-          notes = await analyzeDocument(file);
-        } else {
-          notes = `Unable to process file type: ${file.type}`;
-        }
+        try {
+          let notes;
+          if (file.type.includes("image")) {
+            notes = await analyzeImage(file);
+          } else if (file.type.includes("pdf") || file.type.includes("document")) {
+            notes = await analyzeDocument(file);
+          } else {
+            notes = `Unable to process file type: ${file.type}`;
+          }
 
-        if (uploads.length === 1) {
-          allNotes = notes;
-        } else {
-          allNotes += `\n\n${"─".repeat(50)}\n`;
-          allNotes += `📄 ${file.name}\n`;
-          allNotes += `${"─".repeat(50)}\n\n`;
-          allNotes += notes;
+          if (uploads.length === 1) {
+            allNotes = notes;
+          } else {
+            allNotes += `\n\n${"─".repeat(50)}\n`;
+            allNotes += `📄 ${file.name}\n`;
+            allNotes += `${"─".repeat(50)}\n\n`;
+            allNotes += notes;
+          }
+          
+          successCount++;
+          console.log(`✅ Successfully processed: ${file.name}`);
+        } catch (fileError) {
+          console.error(`❌ Failed to process ${file.name}:`, fileError);
+          failCount++;
+          
+          // Add error message to notes if processing multiple files
+          if (uploads.length > 1) {
+            allNotes += `\n\n${"─".repeat(50)}\n`;
+            allNotes += `📄 ${file.name} - Processing Failed\n`;
+            allNotes += `${"─".repeat(50)}\n\n`;
+            allNotes += `Error: ${fileError.message}\n`;
+          }
         }
+      }
+
+      if (successCount === 0) {
+        throw new Error("Failed to process any files. Please try different files or formats.");
+      }
+
+      if (failCount > 0) {
+        Alert.alert(
+          "Partial Success",
+          `Successfully processed ${successCount} file(s). ${failCount} file(s) failed.`
+        );
       }
 
       setGeneratedNotes(allNotes);
@@ -449,7 +526,7 @@ Format as clean, readable plain text.`;
     }
   };
 
-  // Save notes to Firebase
+  // FIXED: Save notes with proper structure for NotesScreen
   const saveNotes = async (content, mergeWithId = null) => {
     try {
       const currentUser = auth.currentUser;
@@ -459,7 +536,6 @@ Format as clean, readable plain text.`;
       }
 
       if (mergeWithId) {
-        // Merge with existing note
         console.log("🔄 Merging with existing note:", mergeWithId);
         const noteRef = doc(db, 'recordings', mergeWithId);
         const existingNote = matchingNotes.find(n => n.id === mergeWithId);
@@ -472,8 +548,20 @@ Format as clean, readable plain text.`;
           organizedNotes: {
             title: existingNote.organizedNotes?.title || noteTitle,
             content: updatedContent,
+            summary: content.substring(0, 200) + "...",
             aiProvider: 'gemini',
-            sections: [],
+            sections: [
+              {
+                title: "Content",
+                content: updatedContent,
+                subtopics: []
+              }
+            ],
+            keyPoints: [],
+            definitions: {},
+            questions: [],
+            calculations: [],
+            relatedTopics: []
           },
           updatedAt: serverTimestamp()
         });
@@ -492,26 +580,48 @@ Format as clean, readable plain text.`;
           }
         ]);
       } else {
-        // Create new note
-        console.log("💾 Saving new note to Firebase");
+        console.log("💾 Saving new note to Firebase with proper structure");
+        
+        // Create properly structured notes object matching NotesScreen expectations
+        const organizedNotes = {
+          title: noteTitle,
+          content: content,
+          summary: content.substring(0, 200) + "...",
+          aiProvider: 'gemini',
+          sections: [
+            {
+              title: "Content",
+              content: content,
+              subtopics: []
+            }
+          ],
+          keyPoints: content.split('\n').filter(line => 
+            line.trim().length > 20 && 
+            (line.includes('•') || line.includes('-') || /^\d+\./.test(line.trim()))
+          ).slice(0, 5),
+          definitions: {},
+          questions: [
+            "What are the main topics covered in this content?",
+            "What are the key takeaways?",
+            "How does this relate to other material?"
+          ],
+          calculations: [],
+          relatedTopics: []
+        };
         
         await addDoc(collection(db, 'recordings'), {
           userId: currentUser.uid,
           title: noteTitle,
           transcription: content,
-          organizedNotes: {
-            title: noteTitle,
-            content: content,
-            aiProvider: 'gemini',
-            sections: [],
-          },
+          organizedNotes: organizedNotes,
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
           source: 'ai_upload',
           status: 'completed',
+          duration: 0
         });
         
-        console.log("✅ Note saved successfully");
+        console.log("✅ Note saved successfully with proper structure");
         
         Alert.alert("Success! 🎉", "Notes saved successfully!", [
           {
@@ -581,7 +691,7 @@ Format as clean, readable plain text.`;
           </Text>
           
         </View>
-        <BackButton style={{ AlignLeft }} color="#7c3aed" />
+        <BackButton  color="#7c3aed" />
 
         {/* Upload Buttons */}
         <View style={styles.buttonContainer}>

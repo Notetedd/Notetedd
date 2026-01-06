@@ -36,12 +36,15 @@ import {
 // Google OAuth Configuration
 const GOOGLE_CLIENT_ID = "378006316872-gn2he51al2pbfbtm20ukr2550imnso3a.apps.googleusercontent.com";
 
-// Google Classroom API Scopes
+// Google Classroom API Scopes - UPDATED WITH ADDITIONAL SCOPES
 const CLASSROOM_SCOPES = [
   'https://www.googleapis.com/auth/classroom.courses.readonly',
   'https://www.googleapis.com/auth/classroom.coursework.me.readonly',
+  'https://www.googleapis.com/auth/classroom.coursework.students.readonly', // Added for all coursework
+  'https://www.googleapis.com/auth/classroom.courseworkmaterials.readonly', // Added for course materials
   'https://www.googleapis.com/auth/classroom.announcements.readonly',
   'https://www.googleapis.com/auth/classroom.student-submissions.me.readonly',
+  'https://www.googleapis.com/auth/classroom.topics.readonly', // Added for topics
   'https://www.googleapis.com/auth/drive.readonly',
 ];
 
@@ -78,45 +81,37 @@ export default function SyncClassroomScreen({ navigation }) {
   // Generate redirect URI based on platform
   const redirectUri = React.useMemo(() => {
     if (Platform.OS === 'web') {
-      // For web, use window.location.origin
       if (typeof window !== 'undefined') {
         return `${window.location.origin}/auth`;
       }
       return 'http://localhost:19006/auth';
     }
-    // For native (iOS/Android), use custom scheme
     return AuthSession.makeRedirectUri({
       scheme: 'notetedd',
       path: 'auth'
     });
   }, []);
 
-  // OAuth Request Configuration - Using Implicit Flow (Token)
+  // OAuth Request Configuration
   const [request, response, promptAsync] = AuthSession.useAuthRequest(
     {
       clientId: GOOGLE_CLIENT_ID,
       scopes: CLASSROOM_SCOPES,
       redirectUri: redirectUri,
-      // Use implicit flow (token) for native apps without client secret
       responseType: AuthSession.ResponseType.Token,
-      // Disable PKCE since we're using implicit flow
       usePKCE: false,
       extraParams: {
-        // Force account selection
         prompt: 'select_account',
-        // Request offline access
-        access_type: 'online', // Changed to 'online' for implicit flow
+        access_type: 'online',
       },
     },
     discovery
   );
 
-  // Load saved authentication on mount
   useEffect(() => {
     loadSavedAuth();
   }, []);
 
-  // Load saved authentication from Firebase
   const loadSavedAuth = async () => {
     const currentUser = auth.currentUser;
     if (!currentUser) return;
@@ -132,10 +127,7 @@ export default function SyncClassroomScreen({ navigation }) {
           setUserEmail(data.googleClassroom.email);
           setIsAuthenticated(true);
           
-          // Fetch courses after loading auth
           fetchCourses(data.googleClassroom.accessToken);
-          
-          // Load imported materials
           await loadImportedMaterials(currentUser.uid);
         }
       }
@@ -144,7 +136,6 @@ export default function SyncClassroomScreen({ navigation }) {
     }
   };
 
-  // Load list of already imported materials
   const loadImportedMaterials = async (userId) => {
     try {
       const recordingsRef = collection(db, 'recordings');
@@ -171,7 +162,6 @@ export default function SyncClassroomScreen({ navigation }) {
     }
   };
 
-  // Save authentication to Firebase
   const saveAuthToFirebase = async (token, email) => {
     const currentUser = auth.currentUser;
     if (!currentUser) return;
@@ -193,7 +183,6 @@ export default function SyncClassroomScreen({ navigation }) {
     }
   };
 
-  // Remove authentication from Firebase
   const removeAuthFromFirebase = async () => {
     const currentUser = auth.currentUser;
     if (!currentUser) return;
@@ -211,7 +200,6 @@ export default function SyncClassroomScreen({ navigation }) {
     }
   };
 
-  // Handle OAuth response
   useEffect(() => {
     if (response?.type === 'success') {
       const { access_token } = response.params;
@@ -220,13 +208,10 @@ export default function SyncClassroomScreen({ navigation }) {
         setAccessToken(access_token);
         setIsAuthenticated(true);
         
-        // Fetch user profile and courses
         fetchUserProfile(access_token).then(email => {
           if (email) {
-            // Save to Firebase
             saveAuthToFirebase(access_token, email);
             
-            // Load imported materials
             if (auth.currentUser) {
               loadImportedMaterials(auth.currentUser.uid);
             }
@@ -253,7 +238,6 @@ export default function SyncClassroomScreen({ navigation }) {
     }
   }, [response]);
 
-  // Fetch user profile
   const fetchUserProfile = async (token) => {
     try {
       const response = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
@@ -271,7 +255,6 @@ export default function SyncClassroomScreen({ navigation }) {
     }
   };
 
-  // Fetch Google Classroom courses
   const fetchCourses = async (token) => {
     setIsLoading(true);
     try {
@@ -306,7 +289,7 @@ export default function SyncClassroomScreen({ navigation }) {
     }
   };
 
-  // Fetch course materials
+  // UPDATED: Enhanced fetchCourseMaterials to get ALL types of materials
   const fetchCourseMaterials = async (courseId) => {
     setIsFetching(true);
     setProcessingProgress("Fetching course materials...");
@@ -314,67 +297,73 @@ export default function SyncClassroomScreen({ navigation }) {
     try {
       const materials = [];
 
-      // Fetch Announcements
+      // 1. Fetch Announcements
       setProcessingProgress("Fetching announcements...");
       try {
         const announcementsResponse = await fetch(
-          `https://classroom.googleapis.com/v1/courses/${courseId}/announcements?pageSize=50`,
+          `https://classroom.googleapis.com/v1/courses/${courseId}/announcements?pageSize=100`,
           { headers: { Authorization: `Bearer ${accessToken}` } }
         );
         
         if (announcementsResponse.ok) {
           const announcementsData = await announcementsResponse.json();
           const announcements = (announcementsData.announcements || []).map(item => ({
-            id: item.id,
+            id: `announcement_${item.id}`,
+            originalId: item.id,
             type: 'announcement',
-            title: item.text?.substring(0, 50) || 'Untitled Announcement',
+            title: item.text?.substring(0, 100) || 'Untitled Announcement',
             description: item.text || '',
             createdTime: item.creationTime,
             materials: item.materials || [],
           }));
           materials.push(...announcements);
+          console.log(`📢 Found ${announcements.length} announcements`);
         }
       } catch (error) {
-        console.log('No announcements found');
+        console.log('No announcements found:', error.message);
       }
 
-      // Fetch Course Work
-      setProcessingProgress("Fetching assignments...");
+      // 2. Fetch Course Work (Assignments, Quizzes, etc.)
+      setProcessingProgress("Fetching assignments and coursework...");
       try {
         const courseWorkResponse = await fetch(
-          `https://classroom.googleapis.com/v1/courses/${courseId}/courseWork?pageSize=50`,
+          `https://classroom.googleapis.com/v1/courses/${courseId}/courseWork?pageSize=100`,
           { headers: { Authorization: `Bearer ${accessToken}` } }
         );
         
         if (courseWorkResponse.ok) {
           const courseWorkData = await courseWorkResponse.json();
           const assignments = (courseWorkData.courseWork || []).map(item => ({
-            id: item.id,
+            id: `coursework_${item.id}`,
+            originalId: item.id,
             type: 'assignment',
             title: item.title || 'Untitled Assignment',
             description: item.description || '',
             createdTime: item.creationTime,
             dueDate: item.dueDate,
             materials: item.materials || [],
+            workType: item.workType, // ASSIGNMENT, SHORT_ANSWER_QUESTION, MULTIPLE_CHOICE_QUESTION
           }));
           materials.push(...assignments);
+          console.log(`📝 Found ${assignments.length} coursework items`);
         }
       } catch (error) {
-        console.log('No course work found');
+        console.log('No course work found:', error.message);
       }
 
-      // Fetch Course Work Materials
-      setProcessingProgress("Fetching course materials...");
+      // 3. Fetch Course Work Materials (Posted notes, resources, etc.) - THIS IS KEY!
+      setProcessingProgress("Fetching course materials and notes...");
       try {
         const materialsResponse = await fetch(
-          `https://classroom.googleapis.com/v1/courses/${courseId}/courseWorkMaterials?pageSize=50`,
+          `https://classroom.googleapis.com/v1/courses/${courseId}/courseWorkMaterials?pageSize=100`,
           { headers: { Authorization: `Bearer ${accessToken}` } }
         );
         
         if (materialsResponse.ok) {
           const materialsData = await materialsResponse.json();
           const courseMats = (materialsData.courseWorkMaterial || []).map(item => ({
-            id: item.id,
+            id: `material_${item.id}`,
+            originalId: item.id,
             type: 'material',
             title: item.title || 'Untitled Material',
             description: item.description || '',
@@ -382,36 +371,59 @@ export default function SyncClassroomScreen({ navigation }) {
             materials: item.materials || [],
           }));
           materials.push(...courseMats);
+          console.log(`📚 Found ${courseMats.length} course materials`);
         }
       } catch (error) {
-        console.log('No materials found');
+        console.log('No materials found:', error.message);
       }
 
-      console.log(`📝 Found ${materials.length} materials`);
+      // 4. Fetch Topics (optional, for better organization)
+      setProcessingProgress("Fetching topics...");
+      try {
+        const topicsResponse = await fetch(
+          `https://classroom.googleapis.com/v1/courses/${courseId}/topics?pageSize=100`,
+          { headers: { Authorization: `Bearer ${accessToken}` } }
+        );
+        
+        if (topicsResponse.ok) {
+          const topicsData = await topicsResponse.json();
+          console.log(`📂 Found ${(topicsData.topic || []).length} topics`);
+        }
+      } catch (error) {
+        console.log('No topics found:', error.message);
+      }
+
+      console.log(`✅ Total materials found: ${materials.length}`);
+      
+      // Sort by creation time (newest first)
+      materials.sort((a, b) => {
+        const timeA = new Date(a.createdTime || 0);
+        const timeB = new Date(b.createdTime || 0);
+        return timeB - timeA;
+      });
+
       setCourseMaterials(materials);
       
       if (materials.length > 0) {
         setShowMaterialsModal(true);
       } else {
-        Alert.alert('No Materials', 'No materials found for this course.');
+        Alert.alert('No Materials', 'No materials found for this course. The teacher may not have posted any content yet.');
       }
     } catch (error) {
       console.error('Error fetching materials:', error);
-      Alert.alert('Error', 'Failed to fetch course materials');
+      Alert.alert('Error', `Failed to fetch course materials: ${error.message}`);
     } finally {
       setIsFetching(false);
       setProcessingProgress("");
     }
   };
 
-  // Handle course selection
   const handleCourseSelect = (course) => {
     setSelectedCourse(course);
     setShowCourseModal(false);
     fetchCourseMaterials(course.id);
   };
 
-  // Toggle material selection
   const toggleMaterialSelection = (materialId) => {
     setSelectedMaterials(prev => {
       if (prev.includes(materialId)) {
@@ -422,36 +434,46 @@ export default function SyncClassroomScreen({ navigation }) {
     });
   };
 
-  // Select all materials
   const selectAllMaterials = () => {
-    // Only select materials that haven't been imported
     const selectableMaterials = courseMaterials
       .filter(m => !importedMaterials.has(m.id))
       .map(m => m.id);
     setSelectedMaterials(selectableMaterials);
   };
 
-  // Deselect all materials
   const deselectAllMaterials = () => {
     setSelectedMaterials([]);
   };
 
-  // Download file from Google Drive
+  // UPDATED: Enhanced downloadDriveFile with better error handling
   const downloadDriveFile = async (fileId, mimeType) => {
     try {
       let url;
       
-      // Handle Google Docs, Sheets, Slides export
+      console.log(`📥 Downloading file: ${fileId} (${mimeType})`);
+      
+      // Handle Google Docs export
       if (mimeType.includes('google-apps.document')) {
         url = `https://www.googleapis.com/drive/v3/files/${fileId}/export?mimeType=text/plain`;
-      } else if (mimeType.includes('google-apps.spreadsheet')) {
+      } 
+      // Handle Google Sheets export
+      else if (mimeType.includes('google-apps.spreadsheet')) {
         url = `https://www.googleapis.com/drive/v3/files/${fileId}/export?mimeType=text/csv`;
-      } else if (mimeType.includes('google-apps.presentation')) {
+      } 
+      // Handle Google Slides export
+      else if (mimeType.includes('google-apps.presentation')) {
         url = `https://www.googleapis.com/drive/v3/files/${fileId}/export?mimeType=text/plain`;
-      } else if (mimeType.includes('pdf')) {
+      } 
+      // Handle PDF files
+      else if (mimeType.includes('pdf')) {
         url = `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`;
-      } else {
-        // For other files, try to get as text
+      }
+      // Handle text files
+      else if (mimeType.includes('text') || mimeType.includes('plain')) {
+        url = `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`;
+      }
+      // For other files, try direct download
+      else {
         url = `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`;
       }
 
@@ -460,47 +482,74 @@ export default function SyncClassroomScreen({ navigation }) {
       });
 
       if (!response.ok) {
-        throw new Error('Failed to download file');
+        console.warn(`⚠️ Failed to download file ${fileId}: ${response.status}`);
+        return null;
       }
 
       const content = await response.text();
+      console.log(`✅ Downloaded file ${fileId}: ${content.length} characters`);
       return content;
     } catch (error) {
-      console.error('Error downloading file:', error);
+      console.error(`❌ Error downloading file ${fileId}:`, error);
       return null;
     }
   };
 
-  // Process material with Gemini AI
+  // UPDATED: Enhanced processMaterialWithAI with better content extraction
   const processMaterialWithAI = async (material) => {
     try {
-      let contentText = `${material.title}\n\n${material.description || ''}`;
+      let contentText = `Title: ${material.title}\n\n`;
+      
+      if (material.description) {
+        contentText += `Description:\n${material.description}\n\n`;
+      }
 
-      // Process attached materials (Google Drive files, links, etc.)
+      // Process attached materials
       if (material.materials && material.materials.length > 0) {
-        setProcessingProgress(`Processing attachments for: ${material.title}`);
+        setProcessingProgress(`Processing ${material.materials.length} attachment(s) for: ${material.title}`);
         
-        for (const mat of material.materials) {
+        contentText += "Attached Materials:\n\n";
+        
+        for (let i = 0; i < material.materials.length; i++) {
+          const mat = material.materials[i];
+          
+          // Handle Drive files
           if (mat.driveFile && mat.driveFile.driveFile) {
             const fileId = mat.driveFile.driveFile.id;
             const fileTitle = mat.driveFile.driveFile.title;
             const mimeType = mat.driveFile.driveFile.mimeType || '';
 
-            console.log(`📎 Processing: ${fileTitle}`);
+            console.log(`📎 Processing attachment ${i + 1}/${material.materials.length}: ${fileTitle}`);
+            setProcessingProgress(`Reading: ${fileTitle} (${i + 1}/${material.materials.length})`);
             
             const fileContent = await downloadDriveFile(fileId, mimeType);
             if (fileContent) {
-              contentText += `\n\n--- Content from: ${fileTitle} ---\n${fileContent}`;
+              contentText += `\n--- Content from: ${fileTitle} ---\n${fileContent}\n\n`;
+            } else {
+              contentText += `\n--- File: ${fileTitle} (${mimeType}) - Could not extract text content ---\n\n`;
             }
-          } else if (mat.link) {
-            contentText += `\n\nLink: ${mat.link.title || mat.link.url}`;
-          } else if (mat.youtubeVideo) {
-            contentText += `\n\nVideo: ${mat.youtubeVideo.title || mat.youtubeVideo.alternateLink}`;
+          } 
+          // Handle links
+          else if (mat.link) {
+            contentText += `\n--- Link: ${mat.link.title || 'Untitled'} ---\nURL: ${mat.link.url}\n\n`;
+          } 
+          // Handle YouTube videos
+          else if (mat.youtubeVideo) {
+            contentText += `\n--- Video: ${mat.youtubeVideo.title || 'Untitled'} ---\nURL: ${mat.youtubeVideo.alternateLink}\n\n`;
+          }
+          // Handle forms
+          else if (mat.form) {
+            contentText += `\n--- Form: ${mat.form.title || 'Untitled Form'} ---\nURL: ${mat.form.formUrl}\n\n`;
           }
         }
       }
 
-      setProcessingProgress(`Generating notes with AI for: ${material.title}`);
+      // Check if we have meaningful content
+      if (contentText.trim().length < 100) {
+        contentText += "\n\nNote: This material appears to have minimal text content. It may contain primarily visual content, links, or embedded media.";
+      }
+
+      setProcessingProgress(`Generating AI notes for: ${material.title}`);
 
       // Generate notes with Gemini
       const prompt = `You are an expert note-taking assistant. A student has received the following content from their Google Classroom:
@@ -547,6 +596,8 @@ Create organized study notes with the following structure:
    - Suggest how to approach learning this material
    - Recommend any follow-up actions
 
+If the material contains links or references to external content, mention them in the notes.
+
 Format as clean, readable plain text that is easy to review and study from. Make the notes thorough but concise, focusing on understanding and retention.`;
 
       const response = await fetch(`${GEMINI_ENDPOINT}?key=${GEMINI_API_KEY}`, {
@@ -578,7 +629,6 @@ Format as clean, readable plain text that is easy to review and study from. Make
         
         const formattedNotes = formatNotesContent(textParts);
         
-        // Ensure we have meaningful content
         if (formattedNotes.length < 50) {
           throw new Error('Generated notes are too short');
         }
@@ -589,12 +639,10 @@ Format as clean, readable plain text that is easy to review and study from. Make
       throw new Error('No content generated');
     } catch (error) {
       console.error('Error processing material:', error);
-      // Return a fallback with the original content
       return `${material.title}\n\n${material.description || ''}\n\nNote: AI processing encountered an error. Original content preserved.`;
     }
   };
 
-  // Format notes content
   const formatNotesContent = (rawContent) => {
     if (!rawContent) return "";
     
@@ -610,7 +658,6 @@ Format as clean, readable plain text that is easy to review and study from. Make
     return formatted;
   };
 
-  // Process selected materials and save to Firebase
   const processAndSaveMaterials = async () => {
     if (selectedMaterials.length === 0) {
       Alert.alert('No Selection', 'Please select at least one material to import.');
@@ -626,7 +673,6 @@ Format as clean, readable plain text that is easy to review and study from. Make
     setIsFetching(true);
     const materialsToProcess = courseMaterials.filter(m => selectedMaterials.includes(m.id));
     
-    // Filter out already imported materials
     const newMaterials = materialsToProcess.filter(m => !importedMaterials.has(m.id));
     
     if (newMaterials.length === 0) {
@@ -654,7 +700,6 @@ Format as clean, readable plain text that is easy to review and study from. Make
     }
   };
 
-  // Process new materials helper function
   const processNewMaterials = async (materials, currentUser) => {
     const successfulImports = [];
     const failedImports = [];
@@ -665,36 +710,29 @@ Format as clean, readable plain text that is easy to review and study from. Make
         setProcessingProgress(`Processing ${i + 1} of ${materials.length}: ${material.title}`);
 
         try {
-          // Process with AI
           const notesContent = await processMaterialWithAI(material);
 
-          // Verify content quality
           if (!notesContent || notesContent.length < 50) {
             throw new Error('Generated content is too short or empty');
           }
 
-          // Save to Firebase
+          const parsedNotes = parseAIGeneratedNotes(notesContent, material.title);
+
           await addDoc(collection(db, 'recordings'), {
             userId: currentUser.uid,
             title: material.title,
             transcription: notesContent,
-            organizedNotes: {
-              title: material.title,
-              content: notesContent,
-              aiProvider: 'gemini',
-              sections: [],
-            },
+            organizedNotes: parsedNotes,
             createdAt: serverTimestamp(),
             updatedAt: serverTimestamp(),
             source: 'google_classroom',
             classroomCourseId: selectedCourse?.id,
             classroomCourseName: selectedCourse?.name,
             classroomMaterialType: material.type,
-            classroomMaterialId: material.id, // Store material ID for duplicate detection
+            classroomMaterialId: material.id,
             status: 'completed',
           });
 
-          // Add to imported set
           setImportedMaterials(prev => new Set([...prev, material.id]));
           successfulImports.push(material.title);
           
@@ -705,7 +743,6 @@ Format as clean, readable plain text that is easy to review and study from. Make
         }
       }
 
-      // Show results
       if (successfulImports.length > 0) {
         let message = `${successfulImports.length} material(s) imported successfully!`;
         
@@ -750,14 +787,25 @@ Format as clean, readable plain text that is easy to review and study from. Make
     }
   };
 
-  // Reset state
+  // Helper function to parse AI notes (add if missing)
+  const parseAIGeneratedNotes = (content, title) => {
+    return {
+      title: title,
+      sections: [
+        {
+          heading: "Notes",
+          content: content
+        }
+      ]
+    };
+  };
+
   const resetState = () => {
     setSelectedMaterials([]);
     setCourseMaterials([]);
     setSelectedCourse(null);
   };
 
-  // Disconnect Google Classroom
   const handleDisconnect = () => {
     Alert.alert(
       'Disconnect from Google Classroom',
@@ -769,10 +817,8 @@ Format as clean, readable plain text that is easy to review and study from. Make
           style: 'destructive',
           onPress: async () => {
             try {
-              // Remove from Firebase
               await removeAuthFromFirebase();
               
-              // Clear local state
               setIsAuthenticated(false);
               setAccessToken(null);
               setCourses([]);
@@ -792,43 +838,6 @@ Format as clean, readable plain text that is easy to review and study from. Make
           }
         }
       ]
-    );
-  };
-
-  // Display redirect URI info
-  const displayRedirectInfo = () => {
-    return (
-      <View style={styles.redirectInfoBox}>
-        <Text style={styles.redirectInfoTitle}>🔧 OAuth Setup Instructions</Text>
-        <Text style={styles.redirectInfoText}>
-          Platform: {Platform.OS}
-        </Text>
-        <Text style={styles.redirectInfoText}>
-          Add this redirect URI to Google Cloud Console:
-        </Text>
-        <View style={styles.redirectUriContainer}>
-          <Text style={styles.redirectUri} selectable>
-            {redirectUri}
-          </Text>
-        </View>
-        <Text style={styles.redirectInfoSteps}>
-          Setup Steps:{'\n'}
-          1. Go to: console.cloud.google.com{'\n'}
-          2. Select your project{'\n'}
-          3. APIs & Services → Credentials{'\n'}
-          4. Click your OAuth 2.0 Client ID{'\n'}
-          5. Under "Authorized redirect URIs", click ADD URI{'\n'}
-          6. Paste the URI above{'\n'}
-          7. Click SAVE{'\n'}
-          8. Wait 1-2 minutes for changes to propagate{'\n\n'}
-          
-          ⚠️ IMPORTANT:{'\n'}
-          - Application type: "Web application"{'\n'}
-          - NOT "Android" or "iOS"{'\n'}
-          - Use EXACT URI (no trailing spaces){'\n'}
-          - Enable Google Classroom API & Drive API
-        </Text>
-      </View>
     );
   };
 
@@ -872,19 +881,6 @@ Format as clean, readable plain text that is easy to review and study from. Make
                 {isLoading ? 'Connecting...' : 'Connect with Google Classroom'}
               </Text>
             </TouchableOpacity>
-
-            {/* Debug Info - Show Redirect URI */}
-            <TouchableOpacity 
-              style={styles.debugButton}
-              onPress={() => setShowRedirectInfo(!showRedirectInfo)}
-            >
-              <MaterialIcons name="info-outline" size={16} color="#6b7280" />
-              <Text style={styles.debugButtonText}>
-                {showRedirectInfo ? 'Hide' : 'Show'} Setup Instructions
-              </Text>
-            </TouchableOpacity>
-
-            {showRedirectInfo && displayRedirectInfo()}
 
             <View style={styles.privacyNote}>
               <MaterialIcons name="lock" size={16} color="#6b7280" />
@@ -1200,57 +1196,6 @@ const styles = StyleSheet.create({
     marginLeft: 8,
     flex: 1,
     lineHeight: 16,
-  },
-  debugButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    paddingVertical: 8,
-    marginTop: 8,
-  },
-  debugButtonText: {
-    fontSize: 12,
-    color: "#6b7280",
-    marginLeft: 4,
-    textDecorationLine: "underline",
-  },
-  redirectInfoBox: {
-    backgroundColor: "#fef3c7",
-    borderRadius: 8,
-    padding: 16,
-    marginTop: 12,
-    borderWidth: 1,
-    borderColor: "#fbbf24",
-  },
-  redirectInfoTitle: {
-    fontSize: 14,
-    fontWeight: "700",
-    color: "#92400e",
-    marginBottom: 8,
-  },
-  redirectInfoText: {
-    fontSize: 12,
-    color: "#78350f",
-    marginBottom: 8,
-    lineHeight: 16,
-  },
-  redirectUriContainer: {
-    backgroundColor: "#fff",
-    borderRadius: 6,
-    padding: 10,
-    marginBottom: 12,
-    borderWidth: 1,
-    borderColor: "#fbbf24",
-  },
-  redirectUri: {
-    fontSize: 11,
-    color: "#1f2937",
-    fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
-  },
-  redirectInfoSteps: {
-    fontSize: 11,
-    color: "#78350f",
-    lineHeight: 18,
   },
   connectedSection: {
     marginBottom: 24,
