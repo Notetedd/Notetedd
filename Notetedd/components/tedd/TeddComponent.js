@@ -5,9 +5,8 @@ import TeddFloatingButton from './TeddFloatingButton';
 import TeddChatInterface from './TeddChatInterface';
 import TeddPermissionPrompt from './TeddPermissionPrompt';
 import DataService from '../../app/services/Tedd/DataService';
-import TeddSpeechService from '../../app/services/Tedd/TeddSpeechService';
-import VoiceService from '../../app/services/Tedd/VoiceService'; // Your existing VoiceService
-import { app } from '../../firebaseConfig'; // Your Firebase config
+import VoiceService from '../../app/services/Tedd/VoiceService';
+import { app } from '../../firebaseConfig';
 import { getAuth } from 'firebase/auth';
 
 const TeddComponent = ({
@@ -20,7 +19,6 @@ const TeddComponent = ({
 }) => {
   const [teddManager, setTeddManager] = useState(null);
   const [dataService, setDataService] = useState(null);
-  const [speechService, setSpeechService] = useState(null);
   const [teddState, setTeddState] = useState('idle');
   const [conversationMode, setConversationMode] = useState('text');
   const [messages, setMessages] = useState([]);
@@ -50,7 +48,7 @@ const TeddComponent = ({
     const manager = new TeddManager({
       geminiApiKey,
       userId,
-      dataService: dataServiceInstance, // Pass DataService to TeddManager
+      dataService: dataServiceInstance,
       onStateChange: (state, prevState) => {
         console.log('[TeddComponent] State changed:', prevState, '->', state);
         setTeddState(state);
@@ -78,16 +76,14 @@ const TeddComponent = ({
       if (manager) {
         manager.cleanup().catch(console.error);
       }
-      if (speech) {
-        speech.stop().catch(console.error);
-      }
+      // Cleanup VoiceService
+      VoiceService.cleanup().catch(console.error);
     };
   }, [userId, geminiApiKey]);
 
   // Update context when screen or context changes
   useEffect(() => {
     if (isInitialized && teddManager && currentScreen) {
-      // Enhance context with data availability
       enhanceContextWithData().then(enhancedContext => {
         teddManager.updateContext({
           currentScreen,
@@ -102,7 +98,6 @@ const TeddComponent = ({
     if (!dataService) return {};
 
     try {
-      // Get data availability
       const availability = await dataService.checkAvailability();
       
       return {
@@ -118,7 +113,7 @@ const TeddComponent = ({
     }
   };
 
-  const initializeTedd = async (manager, speechServiceInstance) => {
+  const initializeTedd = async (manager) => {
     try {
       console.log('[TeddComponent] Initializing Tedd...');
       
@@ -139,14 +134,6 @@ const TeddComponent = ({
       if (result.speechAvailable && result.hasPermission) {
         console.log('[TeddComponent] Speech available with permission');
         setConversationMode('text'); // Start in text mode, user can switch
-        
-        // Optionally start wake word detection
-        try {
-          await manager.startWakeWordDetection();
-          setConversationMode('speech');
-        } catch (error) {
-          console.log('[TeddComponent] Wake word detection not started:', error.message);
-        }
       } else if (result.speechAvailable && result.needsPermission) {
         console.log('[TeddComponent] Speech available but needs permission');
         setConversationMode('text');
@@ -190,11 +177,13 @@ const TeddComponent = ({
 
       // Set up continuous conversation callback using VoiceService
       VoiceService.setOnSpeechDoneCallback(() => {
-        console.log('[TeddComponent] Speech done, restarting listening...');
-        if (conversationMode === 'speech' && manager && !isSpeaking) {
-          manager.startActiveListening().catch(err => {
-            console.log('[TeddComponent] Could not restart listening:', err.message);
-          });
+        console.log('[TeddComponent] Speech done, checking if should restart listening...');
+        if (conversationMode === 'speech' && manager && !isSpeaking && manager.getState() !== 'listening') {
+          setTimeout(() => {
+            manager.startActiveListening().catch(err => {
+              console.log('[TeddComponent] Could not restart listening:', err.message);
+            });
+          }, 500);
         }
       });
 
@@ -202,20 +191,13 @@ const TeddComponent = ({
       if (result.speechAvailable && result.hasPermission) {
         setTimeout(() => {
           const welcomeText = `Hey ${userName}! I'm Tedd, your study assistant. How can I help you today?`;
-          
-          // Use VoiceService for native compatibility
-          VoiceService.speak(
-            welcomeText,
-            () => setIsSpeaking(true),
-            () => setIsSpeaking(false),
-            (err) => console.error('[TeddComponent] Speech error:', err)
-          );
+          speakMessage(welcomeText);
         }, 500);
       }
 
     } catch (error) {
       console.error('[TeddComponent] Failed to initialize:', error);
-      setIsInitialized(true); // Still mark as initialized to allow text mode
+      setIsInitialized(true);
       setConversationMode('text');
       
       setInitError({
@@ -223,6 +205,18 @@ const TeddComponent = ({
         severity: 'warning',
       });
     }
+  };
+
+  // Centralized speak function (only place to trigger speech)
+  const speakMessage = (text) => {
+    if (!text || text.trim().length === 0) return;
+    
+    VoiceService.speak(
+      text,
+      () => setIsSpeaking(true),
+      () => setIsSpeaking(false),
+      (err) => console.error('[TeddComponent] Speech error:', err)
+    );
   };
 
   const handleNewMessage = useCallback((message) => {
@@ -263,14 +257,9 @@ const TeddComponent = ({
         
         lastMessageIdSpoken.current = cleanMessage.id;
         
-        // Use VoiceService to speak (it will handle continuous conversation)
+        // Use centralized speak function
         setTimeout(() => {
-          VoiceService.speak(
-            cleanMessage.content,
-            () => setIsSpeaking(true),
-            () => setIsSpeaking(false),
-            (err) => console.error('[TeddComponent] Speech error:', err)
-          );
+          speakMessage(cleanMessage.content);
         }, 300);
       }
       
@@ -404,7 +393,6 @@ const TeddComponent = ({
       const enhancedContext = await enhanceContextWithData();
       
       // Send message with enhanced context
-      // sendTextMessage now returns just the response string
       await teddManager.sendTextMessage(text, {
         currentScreen,
         ...context,
@@ -465,11 +453,13 @@ const TeddComponent = ({
     if (!teddManager) return;
     
     try {
-      await teddManager.stopSpeaking();
+      await VoiceService.stopListening();
       
       // Return to appropriate state based on conversation mode
       if (conversationMode === 'speech') {
         await teddManager.startWakeWordDetection().catch(console.error);
+      } else {
+        teddManager.setState('idle');
       }
     } catch (error) {
       console.error('[TeddComponent] Error stopping listening:', error);
@@ -477,22 +467,12 @@ const TeddComponent = ({
   };
 
   const handleStopSpeaking = () => {
-    // Use VoiceService to stop speaking
+    // Stop all speech using VoiceService
     VoiceService.stopSpeaking().catch(error => {
       console.error('[TeddComponent] Error stopping speech:', error);
     });
     
-    if (speechService) {
-      speechService.stop().catch(error => {
-        console.error('[TeddComponent] Error stopping TTS service:', error);
-      });
-    }
-    
-    if (teddManager) {
-      teddManager.stopSpeaking().catch(error => {
-        console.error('[TeddComponent] Error stopping TTS:', error);
-      });
-    }
+    setIsSpeaking(false);
   };
 
   const handleToggleMode = async () => {

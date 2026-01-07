@@ -6,6 +6,7 @@ import { Platform } from 'react-native';
 class TeddManager {
   constructor(config) {
     this.userId = config.userId;
+    this.dataService = config.dataService; // Add DataService
     this.onStateChange = config.onStateChange;
     this.onMessage = config.onMessage;
     this.onError = config.onError;
@@ -13,9 +14,14 @@ class TeddManager {
     
     this.geminiService = new GeminiService({
       apiKey: config.geminiApiKey,
-      model: 'gemini-2.0-flash',
+      model: 'gemini-2.0-flash-exp',
       temperature: 0.7,
     });
+
+    // Set DataService in GeminiService
+    if (this.dataService) {
+      this.geminiService.setDataService(this.dataService);
+    }
 
     this.currentState = 'idle';
     this.currentSessionId = undefined;
@@ -42,7 +48,6 @@ class TeddManager {
       
       if (!audioInit.success) {
         console.log('[TeddManager] Audio not initialized:', audioInit.message);
-        // Don't throw error, just log - user can still use text input
         if (this.onError) {
           const error = new Error('Voice features unavailable. You can still use text chat!');
           error.severity = 'info';
@@ -51,7 +56,6 @@ class TeddManager {
         }
       } else if (audioInit.needsRequest) {
         console.log('[TeddManager] Permissions need to be requested');
-        // Inform user they can enable voice features
         if (this.onError) {
           const error = new Error('Enable microphone to use voice features, or continue with text chat.');
           error.severity = 'info';
@@ -75,7 +79,6 @@ class TeddManager {
         }
       } catch (error) {
         console.error('[TeddManager] Error loading preferences:', error);
-        // Continue initialization even if preferences fail
       }
       
       // Load last conversation
@@ -106,7 +109,6 @@ class TeddManager {
       };
     } catch (error) {
       console.error('[TeddManager] Error initializing Tedd:', error);
-      // Set as initialized anyway - text features still work
       this.isInitialized = true;
       this.setState('idle');
       
@@ -118,7 +120,7 @@ class TeddManager {
     }
   }
 
-  // Request microphone permissions (for manual permission request)
+  // Request microphone permissions
   async requestMicrophonePermission() {
     try {
       const result = await VoiceService.requestPermissions();
@@ -127,7 +129,6 @@ class TeddManager {
         console.log('[TeddManager] Microphone permission granted');
         this.speechAvailable = VoiceService.isSpeechRecognitionAvailable();
         
-        // Notify success
         if (this.onError) {
           const success = new Error('Microphone enabled! You can now use voice features.');
           success.severity = 'success';
@@ -160,7 +161,6 @@ class TeddManager {
     this.conversationMode = mode;
     
     if (mode === 'speech') {
-      // Check if speech is available
       if (!this.speechAvailable) {
         console.log('[TeddManager] Speech not available on this platform');
         
@@ -179,7 +179,6 @@ class TeddManager {
         return false;
       }
       
-      // Check permissions
       if (!VoiceService.hasPermission()) {
         console.log('[TeddManager] No microphone permission');
         
@@ -207,20 +206,18 @@ class TeddManager {
     }
   }
 
-  // Start wake word detection (continuous listening)
+  // Start wake word detection
   async startWakeWordDetection() {
     if (!this.isInitialized) {
       throw new Error('Tedd not initialized');
     }
     
-    // Check if speech recognition is available
     if (!this.speechAvailable) {
       console.log('[TeddManager] Speech recognition not available');
       this.setState('idle');
       return;
     }
     
-    // Check permissions
     if (!VoiceService.hasPermission()) {
       console.log('[TeddManager] No microphone permission for wake word detection');
       this.setState('idle');
@@ -234,7 +231,6 @@ class TeddManager {
       await this.startListeningForWakeWord();
     } catch (error) {
       console.error('[TeddManager] Could not start wake word detection:', error);
-      // Fall back to idle state
       this.setState('idle');
       this.continuousListening = false;
     }
@@ -264,7 +260,6 @@ class TeddManager {
   handleWakeWordResult(result) {
     const { transcript, isFinal } = result;
     
-    // Store interim results
     if (!isFinal) {
       this.interimTranscript = transcript;
       return;
@@ -272,40 +267,33 @@ class TeddManager {
     
     console.log('[TeddManager] Wake word check:', transcript);
     
-    // Check for wake word in final transcript
     if (VoiceService.detectWakeWord(transcript)) {
       console.log('[TeddManager] Wake word detected!');
       
       const command = VoiceService.extractCommand(transcript);
       
       if (command && command.length > 0) {
-        // User said wake word + command in one go
         console.log('[TeddManager] Command with wake word:', command);
         this.handleUserInput(command, 'speech');
       } else {
-        // Just wake word, acknowledge and start listening for command
         console.log('[TeddManager] Wake word only, starting active listening');
         this.startActiveListening();
       }
     }
     
-    // Reset interim transcript
     this.interimTranscript = '';
   }
 
-  // Handle wake word detection errors (separate from general errors)
+  // Handle wake word detection errors
   handleWakeWordError(error) {
     console.log('[TeddManager] Wake word detection error:', error.message);
     
-    // Don't show errors for no-speech or aborted during wake word detection
-    // These are expected during continuous listening
     if (error.message?.includes('No speech') || 
         error.message?.includes('aborted') ||
         error.message?.includes('no-speech')) {
       return;
     }
     
-    // For permission errors, handle specially
     if (error.message?.includes('denied') || error.message?.includes('not-allowed')) {
       this.setState('idle');
       
@@ -320,14 +308,12 @@ class TeddManager {
       return;
     }
     
-    // For other errors, just log and continue
     console.error('[TeddManager] Wake word error:', error);
   }
 
-  // Start active listening (after wake word or manual activation)
+  // Start active listening
   async startActiveListening() {
     try {
-      // Check if speech recognition is available
       if (!this.speechAvailable) {
         console.log('[TeddManager] Speech recognition not available');
         this.setState('idle');
@@ -350,7 +336,7 @@ class TeddManager {
       
       this.setState('listening');
       
-      // Play acknowledgment - "Yes?" or "I'm listening" or "Go ahead"
+      // Play acknowledgment
       const acknowledgments = [
         'Yes?',
         'I\'m listening!',
@@ -360,16 +346,17 @@ class TeddManager {
       ];
       const ack = acknowledgments[Math.floor(Math.random() * acknowledgments.length)];
       
+      // Speak acknowledgment (VoiceService handles this now)
       await VoiceService.speak(ack);
       
-      // Small delay to ensure acknowledgment is heard
+      // Small delay
       await new Promise(resolve => setTimeout(resolve, 100));
       
       // Start listening for user command
       await VoiceService.startListening(
         this.handleListeningResult.bind(this),
         this.handleListeningError.bind(this),
-        false // not continuous - one-time listening
+        false
       );
     } catch (error) {
       console.error('[TeddManager] Error starting active listening:', error);
@@ -377,11 +364,10 @@ class TeddManager {
     }
   }
 
-  // Handle listening errors during active listening
+  // Handle listening errors
   handleListeningError(error) {
     console.error('[TeddManager] Active listening error:', error);
     
-    // Handle different error types
     if (error.unavailable) {
       this.setState('idle');
       if (this.onError) {
@@ -406,13 +392,12 @@ class TeddManager {
     }
   }
 
-  // Handle listening results during active listening
+  // Handle listening results
   handleListeningResult(result) {
     const { transcript, isFinal } = result;
     
     if (!isFinal) {
       this.interimTranscript = transcript;
-      // Optionally notify UI of interim results
       if (this.onMessage) {
         this.onMessage({
           id: 'interim',
@@ -425,11 +410,9 @@ class TeddManager {
       return;
     }
     
-    // Final transcript received
     if (transcript.trim().length > 0) {
       this.handleUserInput(transcript, 'speech');
     } else {
-      // No speech detected, return to appropriate state
       if (this.continuousListening && this.wakeWordEnabled) {
         this.startWakeWordDetection();
       } else {
@@ -440,7 +423,7 @@ class TeddManager {
     this.interimTranscript = '';
   }
 
-  // Handle user input (text or voice)
+  // Handle user input
   async handleUserInput(input, inputMode = 'text') {
     try {
       console.log('[TeddManager] Handling input:', input, 'mode:', inputMode);
@@ -468,14 +451,18 @@ class TeddManager {
         this.onAction(actionDetection.actionType, actionDetection.parameters);
       }
       
+      // Build context with conversation mode info
+      const contextWithMode = {
+        ...this.currentContext,
+        conversationMode: this.conversationMode,
+        isVoiceInput: inputMode === 'speech',
+      };
+      
       // Get AI response
-      let fullResponse = '';
       const response = await this.geminiService.sendMessage(
         input,
-        this.currentContext,
-        (chunk) => {
-          fullResponse += chunk;
-        }
+        contextWithMode,
+        null
       );
       
       // Create assistant message
@@ -484,6 +471,7 @@ class TeddManager {
         role: 'assistant',
         content: response,
         timestamp: new Date(),
+        shouldSpeak: this.conversationMode === 'speech',
       };
       
       if (this.onMessage) {
@@ -493,57 +481,27 @@ class TeddManager {
       // Save conversation
       await this.saveCurrentConversation();
       
-      // Speak response if in speech mode
-      if (this.conversationMode === 'speech') {
-        await this.speak(response);
-      } else {
-        // In text mode, just return to idle
-        this.setState('idle');
-      }
+      // Note: Speech is handled by TeddComponent now, not here
+      // Just set state to idle after processing
+      this.setState('idle');
+      
     } catch (error) {
       console.error('[TeddManager] Error handling input:', error);
       this.handleError(error);
     }
   }
 
-  // Speak a message
-  async speak(text) {
-    try {
-      this.setState('speaking');
-      
-      await VoiceService.speak(
-        text,
-        () => {
-          this.setState('speaking');
-        },
-        () => {
-          // After speaking, return to appropriate state
-          if (this.conversationMode === 'speech' && 
-              this.continuousListening && 
-              this.wakeWordEnabled) {
-            this.startWakeWordDetection();
-          } else {
-            this.setState('idle');
-          }
-        },
-        this.handleError.bind(this)
-      );
-    } catch (error) {
-      this.handleError(error);
+  // Send text message
+  async sendTextMessage(text, context) {
+    // Update context first
+    if (context) {
+      this.updateContext(context);
     }
-  }
-
-  // Stop Tedd from speaking (interruption)
-  async stopSpeaking() {
-    await VoiceService.stopSpeaking();
-  }
-
-  // Send text message (without voice)
-  async sendTextMessage(text) {
+    
     await this.handleUserInput(text, 'text');
   }
 
-  // Manually trigger listening (for push-to-talk button)
+  // Manually trigger listening
   async triggerListening() {
     if (this.conversationMode !== 'speech') {
       console.log('[TeddManager] Not in speech mode, ignoring trigger');
@@ -563,7 +521,7 @@ class TeddManager {
     await this.startActiveListening();
   }
 
-  // Update context (current screen, notes, etc.)
+  // Update context
   updateContext(context) {
     this.currentContext = {
       ...this.currentContext,
@@ -572,7 +530,7 @@ class TeddManager {
     console.log('[TeddManager] Context updated:', this.currentContext);
   }
 
-  // Save current conversation to Firebase
+  // Save current conversation
   async saveCurrentConversation() {
     try {
       const history = this.geminiService.getConversationHistory();
@@ -583,7 +541,6 @@ class TeddManager {
         this.currentSessionId
       );
       
-      // Summarize if history gets too long
       await this.geminiService.summarizeHistory();
     } catch (error) {
       console.error('[TeddManager] Error saving conversation:', error);
@@ -595,7 +552,7 @@ class TeddManager {
     return this.geminiService.getConversationHistory();
   }
 
-  // Clear conversation history
+  // Clear conversation
   async clearConversation() {
     this.geminiService.clearHistory();
     this.currentSessionId = undefined;
@@ -619,7 +576,6 @@ class TeddManager {
       
       await TeddFirebaseService.saveVoicePreferences(newPrefs);
       
-      // Update voice service settings
       VoiceService.updateSettings({
         language: newPrefs.language,
         pitch: newPrefs.pitch,
@@ -629,7 +585,6 @@ class TeddManager {
       
       this.wakeWordEnabled = newPrefs.wakeWordEnabled;
       
-      // Restart wake word detection if needed
       if (this.conversationMode === 'speech' && 
           this.wakeWordEnabled && 
           this.currentState !== 'wake-word-detection') {
@@ -641,22 +596,20 @@ class TeddManager {
     }
   }
 
-  // Get current state
+  // Getters
   getState() {
     return this.currentState;
   }
 
-  // Get current conversation mode
   getConversationMode() {
     return this.conversationMode;
   }
 
-  // Check if speech is available
   isSpeechAvailable() {
     return this.speechAvailable;
   }
 
-  // Set state and notify listeners
+  // Set state
   setState(state) {
     const previousState = this.currentState;
     this.currentState = state;
@@ -676,7 +629,6 @@ class TeddManager {
       this.onError(error);
     }
     
-    // Return to appropriate state
     if (this.conversationMode === 'speech' && 
         this.continuousListening && 
         this.wakeWordEnabled) {
@@ -686,7 +638,7 @@ class TeddManager {
     }
   }
 
-  // Generate unique ID
+  // Generate ID
   generateId() {
     return `${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
   }
