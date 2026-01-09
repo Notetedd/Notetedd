@@ -209,7 +209,7 @@ export default function Sidebar({ isOpen, onClose, navigation }: SidebarProps) {
       title: "Content",
       items: [
         { icon: "school", label: "Sync Classroom Notes", screen: "SyncClassroomScreen", badge: null },
-        { icon: "upload-file", label: "Upload File", screen: "UploadPDFScreen", badge: null },
+        { icon: "upload-file", label: "Upload Notes File", screen: "UploadPDFScreen", badge: null },
         { icon: "attach-money", label: "Sell Notes", screen: "SellNotesScreen", badge: null },
       ],
     },
