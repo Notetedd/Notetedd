@@ -14,7 +14,7 @@ import {
   ActivityIndicator,
 } from "react-native";
 import { Audio } from "expo-av";
-import * as FileSystem from "expo-file-system";
+import * as FileSystem from "expo-file-system/legacy";
 import { LinearGradient } from "expo-linear-gradient";
 import { useNavigation } from '@react-navigation/native';
 import MaterialIcons from "react-native-vector-icons/MaterialIcons";
@@ -481,128 +481,128 @@ export default function RecordScreen({ route }) {
     }
   };
 
-   // ==================== ASSEMBLYAI TRANSCRIPTION ====================
-  const transcribeWithAssemblyAI = async (uri) => {
-    try {
-      console.log("🎯 Starting AssemblyAI transcription...");
+ // ==================== ASSEMBLYAI TRANSCRIPTION ====================
+const transcribeWithAssemblyAI = async (uri) => {
+  try {
+    console.log("🎯 Starting AssemblyAI transcription...");
 
-      if (!ASSEMBLYAI_API_KEY || ASSEMBLYAI_API_KEY.length < 10) {
-        throw new Error("AssemblyAI API key not configured.");
-      }
-
-      // Verify file exists on mobile
-      if (Platform.OS !== "web") {
-        const fileInfo = await FileSystem.getInfoAsync(uri);
-        if (!fileInfo.exists) {
-          throw new Error("Recording file not found at URI: " + uri);
-        }
-        console.log("✅ File verified, size:", fileInfo.size, "bytes");
-      }
-
-      let blob;
-      if (Platform.OS === "web") {
-        const response = await fetch(uri);
-        blob = await response.blob();
-      } else {
-        const base64 = await FileSystem.readAsStringAsync(uri, {
-          encoding: FileSystem.EncodingType.Base64,
-        });
-        
-        const byteCharacters = atob(base64);
-        const byteNumbers = new Array(byteCharacters.length);
-        for (let i = 0; i < byteCharacters.length; i++) {
-          byteNumbers[i] = byteCharacters.charCodeAt(i);
-        }
-        const byteArray = new Uint8Array(byteNumbers);
-        blob = new Blob([byteArray], { type: 'audio/m4a' });
-      }
-
-      console.log("📦 Blob size:", blob.size, "bytes");
-
-      // Upload to AssemblyAI
-      const uploadResponse = await fetch('https://api.assemblyai.com/v2/upload', {
-        method: 'POST',
-        headers: {
-          'authorization': ASSEMBLYAI_API_KEY,
-          'Content-Type': 'application/octet-stream',
-        },
-        body: blob,
-      });
-
-      if (!uploadResponse.ok) {
-        throw new Error(`Upload failed: ${uploadResponse.status}`);
-      }
-
-      const uploadData = await uploadResponse.json();
-      console.log("✅ File uploaded");
-
-      // Request transcription with language detection
-      const transcriptResponse = await fetch('https://api.assemblyai.com/v2/transcript', {
-        method: 'POST',
-        headers: {
-          'authorization': ASSEMBLYAI_API_KEY,
-          'content-type': 'application/json',
-        },
-        body: JSON.stringify({
-          audio_url: uploadData.upload_url,
-          punctuate: true,
-          format_text: true,
-          language_detection: true,
-        }),
-      });
-
-      if (!transcriptResponse.ok) {
-        throw new Error(`Transcription request failed: ${transcriptResponse.status}`);
-      }
-
-      const transcriptData = await transcriptResponse.json();
-      console.log("🆔 Transcript ID:", transcriptData.id);
-
-      // Poll for result
-      let transcript = null;
-      let attempts = 0;
-      const maxAttempts = 60;
-
-      while (attempts < maxAttempts) {
-        await new Promise(resolve => setTimeout(resolve, 3000));
-        
-        const pollResponse = await fetch(`https://api.assemblyai.com/v2/transcript/${transcriptData.id}`, {
-          headers: { 'authorization': ASSEMBLYAI_API_KEY },
-        });
-
-        if (!pollResponse.ok) {
-          throw new Error(`Poll request failed: ${pollResponse.status}`);
-        }
-
-        transcript = await pollResponse.json();
-        console.log("📊 Status:", transcript.status);
-
-        if (transcript.status === 'completed') {
-          console.log("✅ Transcription completed!");
-          console.log("🌍 Detected language:", transcript.language_code);
-          
-          // Detect languages in the text
-          const detectedLangs = detectLanguageFromText(transcript.text);
-          setDetectedLanguages(detectedLangs);
-          
-          return {
-            text: transcript.text,
-            detectedLanguage: transcript.language_code || sourceLanguage,
-            detectedLanguages: detectedLangs,
-          };
-        } else if (transcript.status === 'error') {
-          throw new Error(`Transcription error: ${transcript.error}`);
-        }
-
-        attempts++;
-      }
-
-      throw new Error("Transcription timeout");
-    } catch (error) {
-      console.error("❌ AssemblyAI error:", error);
-      throw error;
+    if (!ASSEMBLYAI_API_KEY || ASSEMBLYAI_API_KEY.length < 10) {
+      throw new Error("AssemblyAI API key not configured.");
     }
-  };
+
+    // Read the file as base64
+    console.log("📱 Reading file from:", uri);
+    const base64Audio = await FileSystem.readAsStringAsync(uri, {
+      encoding: FileSystem.EncodingType.Base64,
+    });
+    
+    console.log("✅ File read successfully");
+
+    // Upload using XMLHttpRequest for better binary handling
+    const uploadUrl = await new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      
+      xhr.onload = () => {
+        if (xhr.status === 200) {
+          try {
+            const response = JSON.parse(xhr.responseText);
+            console.log("✅ File uploaded");
+            resolve(response.upload_url);
+          } catch (e) {
+            reject(new Error('Failed to parse upload response'));
+          }
+        } else {
+          reject(new Error(`Upload failed: ${xhr.status} - ${xhr.responseText}`));
+        }
+      };
+      
+      xhr.onerror = () => reject(new Error('Network error during upload'));
+      
+      xhr.open('POST', 'https://api.assemblyai.com/v2/upload');
+      xhr.setRequestHeader('authorization', ASSEMBLYAI_API_KEY);
+      
+      // Convert base64 to binary string
+      const binaryString = atob(base64Audio);
+      const bytes = new Uint8Array(binaryString.length);
+      for (let i = 0; i < binaryString.length; i++) {
+        bytes[i] = binaryString.charCodeAt(i);
+      }
+      
+      console.log("⬆️ Uploading", bytes.length, "bytes to AssemblyAI...");
+      xhr.send(bytes.buffer);
+    });
+
+    console.log("✅ Upload URL received:", uploadUrl);
+
+    // Request transcription with language detection
+    console.log("🎬 Requesting transcription...");
+    const transcriptResponse = await fetch('https://api.assemblyai.com/v2/transcript', {
+      method: 'POST',
+      headers: {
+        'authorization': ASSEMBLYAI_API_KEY,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        audio_url: uploadUrl,
+        punctuate: true,
+        format_text: true,
+        language_detection: true,
+      }),
+    });
+
+    if (!transcriptResponse.ok) {
+      const errorText = await transcriptResponse.text();
+      throw new Error(`Transcription request failed: ${transcriptResponse.status} - ${errorText}`);
+    }
+
+    const transcriptData = await transcriptResponse.json();
+    console.log("🆔 Transcript ID:", transcriptData.id);
+
+    // Poll for result
+    let transcript = null;
+    let attempts = 0;
+    const maxAttempts = 60;
+
+    while (attempts < maxAttempts) {
+      await new Promise(resolve => setTimeout(resolve, 3000));
+      
+      const pollResponse = await fetch(`https://api.assemblyai.com/v2/transcript/${transcriptData.id}`, {
+        headers: { 'authorization': ASSEMBLYAI_API_KEY },
+      });
+
+      if (!pollResponse.ok) {
+        throw new Error(`Poll request failed: ${pollResponse.status}`);
+      }
+
+      transcript = await pollResponse.json();
+      console.log("📊 Status:", transcript.status);
+
+      if (transcript.status === 'completed') {
+        console.log("✅ Transcription completed!");
+        console.log("🌍 Detected language:", transcript.language_code);
+        
+        // Detect languages in the text
+        const detectedLangs = detectLanguageFromText(transcript.text);
+        setDetectedLanguages(detectedLangs);
+        
+        return {
+          text: transcript.text,
+          detectedLanguage: transcript.language_code || sourceLanguage,
+          detectedLanguages: detectedLangs,
+        };
+      } else if (transcript.status === 'error') {
+        throw new Error(`Transcription error: ${transcript.error}`);
+      }
+
+      attempts++;
+    }
+
+    throw new Error("Transcription timeout");
+  } catch (error) {
+    console.error("❌ AssemblyAI error:", error);
+    throw error;
+  }
+};
 
   // ==================== RECORDING CONTROLS ====================
   const startRecording = async () => {
