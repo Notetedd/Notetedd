@@ -8,8 +8,6 @@
     "scheme": "notetedd",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
-    
-
     "ios": {
       "infoPlist": {
         "NSMicrophoneUsageDescription": "Notetedd needs microphone access to enable voice commands with Tedd, your AI study assistant.",
@@ -17,22 +15,31 @@
         "supportsTablet": true
       },
       "bundleIdentifier": "com.notetedd.app"
-      
     },
     "android": {
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./public/icon-512.png"
-        // "backgroundImage": "./public/icon-512.png",
-        // "monochromeImage": "./public/icon-512.png"
       },
       "edgeToEdgeEnabled": true,
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS"
+      ],
+      "package": "com.notetedd.app"
     },
     "web": {
       "output": "static",
       "favicon": "./public/icon.png",
-      "permissions":["camera", "bluetooth"]
+      "permissions": [
+        "camera",
+        "bluetooth"
+      ]
     },
     "plugins": [
       "expo-router",
@@ -49,10 +56,9 @@
           "scope": "/"
         }
       ],
-      "expo-barcode-scanner",
+      
       [
         "expo-audio",
-      
         {
           "microphonePermission": "Allow $(PRODUCT_NAME) to access your microphone."
         }
@@ -64,7 +70,7 @@
       "typedRoutes": true,
       "reactCompiler": true
     },
-     "extra": {
+    "extra": {
       "geminiApiKey": "AIzaSyCZVQqMteS8jSA_cAYOUS0XxzwHxzgIaNI"
     }
   }
