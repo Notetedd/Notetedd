@@ -1,14 +1,14 @@
-import React, { Component, ReactNode, useEffect } from "react";
-
+import React, { Component, ReactNode, useEffect, useState } from "react";
 
 import { Slot } from "expo-router/build";
 import Toast from "react-native-toast-message";
-import { View, Text, Platform } from "react-native";
+import { View, Text, Platform, ActivityIndicator } from "react-native";
 
 import { createStackNavigator } from '@react-navigation/stack';
 import { NavigationContainer } from '@react-navigation/native';
 import { StatusBar } from 'react-native';
 
+// Existing Screens
 import HomeScreen from './HomeScreen';
 import ProfileScreen from './ProfileScreen';
 import RecordScreen from "./RecordScreen";
@@ -26,7 +26,17 @@ import PaymentMethodsScreen from "./PaymentMethodsScreen";
 import SubscriptionPlanScreen from "./SubscriptionPlanScreen";
 import ResetPasswordScreen from "./ResetPasswordScreen";
 
+// RevenueCat Screens
+import PaywallScreen from './PaywallScreen';
+import CustomerCenterScreen from './CustomerCenterScreen';
+import CustomSubscriptionScreen from './CustomSubscriptionScreen';
+
+// Contexts
 import ThemeProvider, { useTheme } from "./context/ThemeContext";
+import { SubscriptionProvider } from "./context/SubscriptionContext";
+
+// RevenueCat Config
+import { initializeRevenueCat } from "./../RevenueCatConfig";
 
 import { LogBox } from 'react-native';
 LogBox.ignoreAllLogs(); // optional
@@ -97,7 +107,10 @@ export default function App() {
   return (
     <ErrorBoundary>
       <ThemeProvider>
-        <AppContent />
+        <SubscriptionProvider>
+          <AppContent />
+          
+        </SubscriptionProvider>
       </ThemeProvider>
     </ErrorBoundary>
   );
@@ -105,9 +118,15 @@ export default function App() {
 
 // ==================== APP CONTENT ====================
 function AppContent() {
-  
   const { theme, colors } = useTheme();
+  const [isInitialized, setIsInitialized] = useState(false);
 
+  // Initialize RevenueCat on app start
+  useEffect(() => {
+    initApp();
+  }, []);
+
+  // Service Worker registration (Web only)
   useEffect(() => {
     if (Platform.OS === 'web') {
       if ('serviceWorker' in navigator) {
@@ -122,6 +141,45 @@ function AppContent() {
       }
     }
   }, []);
+
+  const initApp = async () => {
+    try {
+      // Initialize RevenueCat SDK
+      const success = await initializeRevenueCat();
+      
+      if (success) {
+        console.log('✅ RevenueCat initialized successfully');
+      } else {
+        console.warn('⚠️ RevenueCat initialization failed - app will continue without subscription features');
+      }
+    } catch (error) {
+      console.error('❌ App initialization error:', error);
+      // App continues even if RevenueCat fails
+    } finally {
+      setIsInitialized(true);
+    }
+  };
+
+  // Show loading screen while initializing
+  if (!isInitialized) {
+    return (
+      <View style={{ 
+        flex: 1, 
+        justifyContent: 'center', 
+        alignItems: 'center', 
+        backgroundColor: colors.background 
+      }}>
+        <ActivityIndicator size="large" color={colors.primary} />
+        <Text style={{ 
+          marginTop: 16, 
+          fontSize: 16, 
+          color: colors.text 
+        }}>
+          Loading Notetedd...
+        </Text>
+      </View>
+    );
+  }
 
   return (
     <>
@@ -154,6 +212,7 @@ function AppContent() {
             },
           }}
         >
+          {/* ==================== EXISTING SCREENS ==================== */}
           <Stack.Screen 
             name="HomeScreen" 
             component={HomeScreen}
@@ -234,7 +293,32 @@ function AppContent() {
             component={ResetPasswordScreen}
             options={{ title: 'Reset Password' }}
           />
-          
+
+          {/* ==================== REVENUECAT SCREENS ==================== */}
+          <Stack.Screen 
+            name="PaywallScreen" 
+            component={PaywallScreen}
+            options={{ 
+              headerShown: false,
+              presentation: 'modal' 
+            }}
+          />
+          <Stack.Screen 
+            name="CustomerCenterScreen" 
+            component={CustomerCenterScreen}
+            options={{ 
+              headerShown: false,
+              presentation: 'modal' 
+            }}
+          />
+          <Stack.Screen 
+            name="CustomSubscriptionScreen" 
+            component={CustomSubscriptionScreen}
+            options={{ 
+              headerShown: false,
+              presentation: 'modal' 
+            }}
+          />
         </Stack.Navigator>
         <Toast />
       </NavigationContainer>

@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef } from "react";
 import {
   View,
@@ -33,9 +32,10 @@ import {
   deleteDoc,
   serverTimestamp,
   getDoc,
+  updateDoc,
+  orderBy,
+  limit,
 } from "firebase/firestore";
-import DevicePermissions from './utils/devicePermissions';
-import QRCodeScanner from '../components/QRCodeScanner';
 import BackButton from "../components/Backbutton";
 import { useTheme } from "./context/ThemeContext";
 
@@ -49,24 +49,22 @@ export default function PairedDevicesScreen({ navigation, route }) {
   const db = getFirestore();
   
   const [pairedDevices, setPairedDevices] = useState([]);
-  const [availableDevices, setAvailableDevices] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [scanning, setScanning] = useState(false);
   const [showPairModal, setShowPairModal] = useState(false);
-  const [selectedPairMethod, setSelectedPairMethod] = useState(null);
   const [deviceInfo, setDeviceInfo] = useState(null);
-  const [showQRModal, setShowQRModal] = useState(false);
-  const [showQRScanner, setShowQRScanner] = useState(false);
-  const [qrCode, setQrCode] = useState(null);
   const [connectionCode, setConnectionCode] = useState("");
   const [codeInput, setCodeInput] = useState("");
   const [isSubmittingCode, setIsSubmittingCode] = useState(false);
+  const [isGeneratingCode, setIsGeneratingCode] = useState(false);
+  const [isOnline, setIsOnline] = useState(true);
+  const [syncingDevices, setSyncingDevices] = useState(new Set());
+  const [latestRecordings, setLatestRecordings] = useState({});
   
   // Animations
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const slideAnim = useRef(new Animated.Value(30)).current;
   const pulseAnim = useRef(new Animated.Value(1)).current;
-  const scanAnim = useRef(new Animated.Value(0)).current;
+  const codeFlashAnim = useRef(new Animated.Value(1)).current;
 
   useEffect(() => {
     // Entrance animations
@@ -103,27 +101,42 @@ export default function PairedDevicesScreen({ navigation, route }) {
     initializeDeviceInfo();
     loadPairedDevices();
     requestPermissions();
+    checkNetworkStatus();
+
+    // Monitor network status
+    const networkInterval = setInterval(checkNetworkStatus, 5000);
+
+    return () => {
+      clearInterval(networkInterval);
+    };
   }, []);
 
-  // Scan animation
-  useEffect(() => {
-    if (scanning) {
-      Animated.loop(
-        Animated.timing(scanAnim, {
-          toValue: 1,
-          duration: 2000,
-          useNativeDriver: true,
-        })
-      ).start();
-    } else {
-      scanAnim.setValue(0);
-    }
-  }, [scanning]);
+  // Flash animation for generated code
+  const flashCode = () => {
+    Animated.sequence([
+      Animated.timing(codeFlashAnim, {
+        toValue: 1.3,
+        duration: 200,
+        useNativeDriver: true,
+      }),
+      Animated.timing(codeFlashAnim, {
+        toValue: 1,
+        duration: 200,
+        useNativeDriver: true,
+      }),
+    ]).start();
+  };
 
-  const scanRotate = scanAnim.interpolate({
-    inputRange: [0, 1],
-    outputRange: ['0deg', '360deg'],
-  });
+  // ==================== NETWORK STATUS ====================
+  const checkNetworkStatus = async () => {
+    try {
+      const networkState = await Network.getNetworkStateAsync();
+      setIsOnline(networkState.isConnected && networkState.isInternetReachable);
+    } catch (error) {
+      console.error('Network check error:', error);
+      setIsOnline(false);
+    }
+  };
 
   // ==================== PERMISSIONS ====================
   const requestPermissions = async () => {
@@ -134,10 +147,7 @@ export default function PairedDevicesScreen({ navigation, route }) {
           PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT,
           PermissionsAndroid.PERMISSIONS.BLUETOOTH_ADVERTISE,
           PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
-          PermissionsAndroid.PERMISSIONS.ACCESS_WIFI_STATE,
-          PermissionsAndroid.PERMISSIONS.CHANGE_WIFI_STATE,
         ]);
-
         console.log('Permissions:', granted);
       } catch (err) {
         console.warn('Permission error:', err);
@@ -149,7 +159,13 @@ export default function PairedDevicesScreen({ navigation, route }) {
   const initializeDeviceInfo = async () => {
     try {
       const networkState = await Network.getNetworkStateAsync();
-      const ipAddress = await Network.getIpAddressAsync();
+      let ipAddress = "N/A";
+      
+      try {
+        ipAddress = await Network.getIpAddressAsync();
+      } catch (e) {
+        console.log("IP not available:", e);
+      }
       
       const info = {
         id: auth.currentUser?.uid || Device.osBuildId,
@@ -169,12 +185,13 @@ export default function PairedDevicesScreen({ navigation, route }) {
       console.log('Device Info:', info);
 
       // Register device in Firestore
-      if (auth.currentUser) {
+      if (auth.currentUser && networkState.isConnected) {
         await setDoc(doc(db, "devices", info.id), {
           ...info,
           userId: auth.currentUser.uid,
           lastSeen: serverTimestamp(),
-        });
+          isActive: true,
+        }, { merge: true });
       }
     } catch (error) {
       console.error('Error getting device info:', error);
@@ -190,11 +207,12 @@ export default function PairedDevicesScreen({ navigation, route }) {
       const pairingsRef = collection(db, "devicePairings");
       const q = query(
         pairingsRef,
-        where("userId", "==", auth.currentUser.uid)
+        where("userId", "==", auth.currentUser.uid),
+        where("status", "==", "active")
       );
 
-      // Real-time listener
-      const unsubscribe = onSnapshot(q, (snapshot) => {
+      // Real-time listener for paired devices
+      const unsubscribe = onSnapshot(q, async (snapshot) => {
         const devices = [];
         snapshot.forEach((doc) => {
           devices.push({ id: doc.id, ...doc.data() });
@@ -202,6 +220,11 @@ export default function PairedDevicesScreen({ navigation, route }) {
         
         setPairedDevices(devices);
         setLoading(false);
+
+        // Load latest recordings for each paired device
+        devices.forEach(device => {
+          loadLatestRecordingForDevice(device);
+        });
       });
 
       return unsubscribe;
@@ -211,103 +234,200 @@ export default function PairedDevicesScreen({ navigation, route }) {
     }
   };
 
-  // ==================== SCAN FOR DEVICES ====================
-  const scanForDevices = async () => {
-    setScanning(true);
-    setAvailableDevices([]);
-
+  // ==================== LOAD LATEST RECORDING FROM PAIRED DEVICE ====================
+  const loadLatestRecordingForDevice = async (device) => {
     try {
-      // Scan for devices in the same network
-      const devicesRef = collection(db, "devices");
-      const q = query(devicesRef);
+      // Get the device owner's latest recording
+      const targetDeviceUserId = device.targetDevice?.userId || device.userId;
       
-      const snapshot = await getDocs(q);
-      const devices = [];
-      
-      snapshot.forEach((doc) => {
-        const data = doc.data();
-        // Don't show current device
-        if (data.id !== deviceInfo?.id && data.userId !== auth.currentUser?.uid) {
-          devices.push({ id: doc.id, ...data });
+      const recordingsRef = collection(db, "recordings");
+      const q = query(
+        recordingsRef,
+        where("userId", "==", targetDeviceUserId),
+        where("deviceId", "==", device.targetDevice?.id),
+        orderBy("createdAt", "desc"),
+        limit(1)
+      );
+
+      const unsubscribe = onSnapshot(q, (snapshot) => {
+        if (!snapshot.empty) {
+          const latestRecording = { id: snapshot.docs[0].id, ...snapshot.docs[0].data() };
+          setLatestRecordings(prev => ({
+            ...prev,
+            [device.id]: latestRecording
+          }));
         }
       });
 
-      // Simulate network scan (in real app, use Bluetooth/WiFi Direct)
-      setTimeout(() => {
-        setAvailableDevices(devices);
-        setScanning(false);
-      }, 2000);
+      return unsubscribe;
+    } catch (error) {
+      console.error('Error loading latest recording:', error);
+    }
+  };
+
+  // ==================== SYNC RECORDING FROM PAIRED DEVICE ====================
+  const syncRecordingFromDevice = async (device, recording) => {
+    try {
+      setSyncingDevices(prev => new Set([...prev, device.id]));
+      
+      // Create a copy of the recording in the current user's account
+      const syncedRecording = {
+        ...recording,
+        userId: auth.currentUser.uid,
+        syncedFrom: {
+          deviceId: device.targetDevice?.id,
+          deviceName: device.targetDevice?.name,
+          originalUserId: recording.userId,
+        },
+        syncedAt: serverTimestamp(),
+        originalRecordingId: recording.id,
+        isSynced: true,
+      };
+
+      await addDoc(collection(db, "recordings"), syncedRecording);
+
+      // Update sync status
+      await updateDoc(doc(db, "devicePairings", device.id), {
+        lastSync: serverTimestamp(),
+        lastSyncedRecordingId: recording.id,
+      });
+
+      Alert.alert(
+        "Success! 🎉",
+        `Synced recording from ${device.targetDevice?.name}`,
+        [
+          {
+            text: "View Recording",
+            onPress: () => {
+              if (navigation?.navigate) {
+                navigation.navigate("NotesScreen", { refresh: Date.now() });
+              }
+            },
+          },
+          { text: "OK" }
+        ]
+      );
 
     } catch (error) {
-      console.error('Scan error:', error);
-      setScanning(false);
-      Alert.alert('Error', 'Failed to scan for devices');
-    }
-  };
-
-  // ==================== PAIRING METHODS ====================
-  const generateConnectionCode = () => {
-    const code = Math.random().toString(36).substring(2, 8).toUpperCase();
-    setConnectionCode(code);
-    
-    // Store in Firestore for others to discover
-    if (auth.currentUser) {
-      setDoc(doc(db, "pairingCodes", code), {
-        deviceId: deviceInfo.id,
-        userId: auth.currentUser.uid,
-        deviceInfo: deviceInfo,
-        expiresAt: new Date(Date.now() + 5 * 60 * 1000), // 5 minutes
-        createdAt: serverTimestamp(),
+      console.error('Sync error:', error);
+      Alert.alert('Error', 'Failed to sync recording: ' + error.message);
+    } finally {
+      setSyncingDevices(prev => {
+        const updated = new Set(prev);
+        updated.delete(device.id);
+        return updated;
       });
     }
-    
-    return code;
   };
 
+  // ==================== PAIRING CODE GENERATION ====================
+  const generateConnectionCode = async () => {
+    setIsGeneratingCode(true);
+    try {
+      // Generate a secure 6-digit code
+      const code = Math.random().toString().slice(2, 8);
+      setConnectionCode(code);
+      flashCode();
+      
+      // Store in Firestore with security measures
+      if (auth.currentUser) {
+        const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes
+        
+        await setDoc(doc(db, "pairingCodes", code), {
+          deviceId: deviceInfo.id,
+          userId: auth.currentUser.uid,
+          userEmail: auth.currentUser.email,
+          deviceInfo: {
+            id: deviceInfo.id,
+            name: deviceInfo.name,
+            type: deviceInfo.type,
+            os: deviceInfo.os,
+          },
+          expiresAt: expiresAt,
+          createdAt: serverTimestamp(),
+          used: false,
+          maxUses: 1, // Security: Can only be used once
+        });
+
+        console.log("✅ Code generated:", code);
+        
+        // Auto-cleanup after expiration
+        setTimeout(async () => {
+          try {
+            const codeDoc = await getDoc(doc(db, "pairingCodes", code));
+            if (codeDoc.exists() && !codeDoc.data().used) {
+              await deleteDoc(doc(db, "pairingCodes", code));
+              console.log("🗑️ Expired code cleaned up");
+            }
+          } catch (e) {
+            console.log("Cleanup error:", e);
+          }
+        }, 5 * 60 * 1000);
+      }
+    } catch (error) {
+      console.error('Code generation error:', error);
+      Alert.alert('Error', 'Failed to generate code');
+    } finally {
+      setIsGeneratingCode(false);
+    }
+  };
+
+  // ==================== PAIR WITH CODE ====================
   const pairWithCode = async (code) => {
     if (!code || code.length !== 6) {
-      Alert.alert('Error', 'Please enter a valid 6-character code');
+      Alert.alert('Error', 'Please enter a valid 6-digit code');
       return;
     }
 
     setIsSubmittingCode(true);
     try {
-      // Query for the pairing code
-      const codesRef = collection(db, "pairingCodes");
-      const q = query(codesRef, where("__name__", "==", code.toUpperCase()));
-      const querySnapshot = await getDocs(q);
+      const codeDocRef = doc(db, "pairingCodes", code);
+      const codeDoc = await getDoc(codeDocRef);
 
-      if (querySnapshot.empty) {
-        Alert.alert('Error', 'Invalid or expired code');
+      if (!codeDoc.exists()) {
+        Alert.alert('Error', 'Invalid code. Please check and try again.');
         setIsSubmittingCode(false);
         return;
       }
 
-      let targetDevice = null;
-      querySnapshot.forEach((doc) => {
-        targetDevice = doc.data();
+      const codeData = codeDoc.data();
+
+      // Security checks
+      if (codeData.used) {
+        Alert.alert('Error', 'This code has already been used.');
+        setIsSubmittingCode(false);
+        return;
+      }
+
+      const expiresAt = codeData.expiresAt?.toDate() || new Date(0);
+      if (expiresAt < new Date()) {
+        Alert.alert('Error', 'This code has expired. Please generate a new one.');
+        await deleteDoc(codeDocRef);
+        setIsSubmittingCode(false);
+        return;
+      }
+
+      // Prevent self-pairing
+      if (codeData.userId === auth.currentUser?.uid) {
+        Alert.alert('Error', 'You cannot pair with your own device.');
+        setIsSubmittingCode(false);
+        return;
+      }
+
+      // Mark code as used
+      await updateDoc(codeDocRef, {
+        used: true,
+        usedAt: serverTimestamp(),
+        usedBy: auth.currentUser?.uid,
       });
 
-      if (!targetDevice) {
-        Alert.alert('Error', 'Invalid or expired code');
-        setIsSubmittingCode(false);
-        return;
-      }
+      await pairDevice(codeData.deviceInfo, 'code', codeData.userId);
+      
+      // Clean up used code
+      setTimeout(() => deleteDoc(codeDocRef), 1000);
 
-      // Check if code is expired
-      const expiresAt = targetDevice.expiresAt?.toDate() || new Date(0);
-      if (expiresAt < new Date()) {
-        Alert.alert('Error', 'This code has expired');
-        // Delete expired code
-        await deleteDoc(doc(db, "pairingCodes", code.toUpperCase()));
-        setIsSubmittingCode(false);
-        return;
-      }
-
-      await pairDevice(targetDevice.deviceInfo, 'code');
-      Alert.alert('Success!', 'Device paired successfully');
-      setShowQRModal(false);
       setCodeInput("");
+      setShowPairModal(false);
 
     } catch (error) {
       console.error('Pairing error:', error);
@@ -317,43 +437,70 @@ export default function PairedDevicesScreen({ navigation, route }) {
     }
   };
 
-  const pairDevice = async (targetDevice, method) => {
+  // ==================== PAIR DEVICE ====================
+  const pairDevice = async (targetDevice, method, targetUserId) => {
     if (!auth.currentUser || !deviceInfo) return;
 
     try {
       const pairingId = `${deviceInfo.id}_${targetDevice.id}`;
       
-      await setDoc(doc(db, "devicePairings", pairingId), {
+      // Check if already paired
+      const existingPairing = await getDoc(doc(db, "devicePairings", pairingId));
+      if (existingPairing.exists() && existingPairing.data().status === 'active') {
+        Alert.alert('Info', 'Devices are already paired!');
+        return;
+      }
+
+      const pairingData = {
         userId: auth.currentUser.uid,
         sourceDevice: {
           id: deviceInfo.id,
           name: deviceInfo.name,
           type: deviceInfo.type,
+          userId: auth.currentUser.uid,
         },
         targetDevice: {
           id: targetDevice.id,
           name: targetDevice.name,
           type: targetDevice.type,
+          userId: targetUserId,
         },
         method: method,
         status: 'active',
         pairedAt: serverTimestamp(),
-        lastSync: serverTimestamp(),
+        lastSync: null,
+        syncEnabled: true,
+        autoSync: false, // User can enable auto-sync
+      };
+
+      await setDoc(doc(db, "devicePairings", pairingId), pairingData);
+
+      // Create reverse pairing for bidirectional sync
+      const reversePairingId = `${targetDevice.id}_${deviceInfo.id}`;
+      await setDoc(doc(db, "devicePairings", reversePairingId), {
+        ...pairingData,
+        userId: targetUserId,
+        sourceDevice: pairingData.targetDevice,
+        targetDevice: pairingData.sourceDevice,
       });
 
-      Alert.alert('Success!', `Paired with ${targetDevice.name}`);
-      setShowPairModal(false);
+      Alert.alert(
+        'Success! 🎉',
+        `Paired with ${targetDevice.name}\n\nYou can now sync recordings from this device.`,
+        [{ text: 'OK' }]
+      );
       
     } catch (error) {
       console.error('Pairing error:', error);
-      Alert.alert('Error', 'Failed to pair device');
+      Alert.alert('Error', 'Failed to pair device: ' + error.message);
     }
   };
 
+  // ==================== UNPAIR DEVICE ====================
   const unpairDevice = async (pairingId, deviceName) => {
     Alert.alert(
       'Unpair Device',
-      `Remove ${deviceName} from paired devices?`,
+      `Remove ${deviceName} from paired devices?\n\nSynced recordings will remain in your account.`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -361,8 +508,11 @@ export default function PairedDevicesScreen({ navigation, route }) {
           style: 'destructive',
           onPress: async () => {
             try {
-              await deleteDoc(doc(db, "devicePairings", pairingId));
-              Alert.alert('Success', 'Device unpaired');
+              await updateDoc(doc(db, "devicePairings", pairingId), {
+                status: 'inactive',
+                unpairedAt: serverTimestamp(),
+              });
+              Alert.alert('Success', 'Device unpaired successfully');
             } catch (error) {
               console.error('Unpair error:', error);
               Alert.alert('Error', 'Failed to unpair device');
@@ -373,38 +523,34 @@ export default function PairedDevicesScreen({ navigation, route }) {
     );
   };
 
+  // ==================== TOGGLE AUTO-SYNC ====================
+  const toggleAutoSync = async (pairingId, currentValue) => {
+    try {
+      await updateDoc(doc(db, "devicePairings", pairingId), {
+        autoSync: !currentValue,
+      });
+    } catch (error) {
+      console.error('Toggle auto-sync error:', error);
+    }
+  };
+
   // ==================== RENDER FUNCTIONS ====================
-  const renderPairMethodCard = (icon, title, description, method, color) => (
+  const renderPairMethodCard = (icon, title, description, method, color, badge = null) => (
     <TouchableOpacity
       style={[styles.methodCard, isDark && styles.methodCardDark]}
       onPress={() => {
-        setSelectedPairMethod(method);
-        if (method === 'qr') {
-          // Show option to scan or generate
+        if (method === 'code') {
+          // Primary method - show code generation
+          generateConnectionCode();
+        } else if (method === 'bluetooth') {
           Alert.alert(
-            'QR Code Pairing',
-            'Would you like to:',
-            [
-              { 
-                text: 'Scan QR Code', 
-                onPress: () => setShowQRScanner(true) 
-              },
-              { 
-                text: 'Generate Code', 
-                onPress: () => {
-                  const code = generateConnectionCode();
-                  setShowQRModal(true);
-                } 
-              },
-              { text: 'Cancel', style: 'cancel' }
-            ]
+            'Bluetooth Pairing',
+            'Bluetooth pairing is ideal for offline mode and connecting microphones.\n\nComing in next update!',
+            [{ text: 'OK' }]
           );
-        } else if (method === 'wifi') {
-          scanForDevices();
-        } else if (method === 'code') {
-          setShowQRModal(true);
         }
       }}
+      disabled={method === 'bluetooth'}
     >
       <LinearGradient
         colors={[color + '20', color + '10']}
@@ -412,100 +558,136 @@ export default function PairedDevicesScreen({ navigation, route }) {
       >
         <MaterialIcons name={icon} size={36} color={color} />
       </LinearGradient>
-      <Text style={[styles.methodTitle, isDark && styles.textDark]}>{title}</Text>
-      <Text style={[styles.methodDescription, isDark && styles.textSecondaryDark]}>
-        {description}
-      </Text>
+      <View style={{ flex: 1 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+          <Text style={[styles.methodTitle, isDark && styles.textDark]}>{title}</Text>
+          {badge && (
+            <View style={[styles.badge, badge === 'PRIMARY' && styles.primaryBadge]}>
+              <Text style={styles.badgeText}>{badge}</Text>
+            </View>
+          )}
+        </View>
+        <Text style={[styles.methodDescription, isDark && styles.textSecondaryDark]}>
+          {description}
+        </Text>
+      </View>
     </TouchableOpacity>
   );
 
-  const renderPairedDevice = ({ item, index }) => (
-    <Animated.View
-      style={[
-        styles.deviceCard,
-        isDark && styles.deviceCardDark,
-        {
-          opacity: fadeAnim,
-          transform: [{
-            translateY: slideAnim.interpolate({
-              inputRange: [0, 30],
-              outputRange: [0, index * 5],
-            }),
-          }],
-        },
-      ]}
-    >
-      <View style={styles.deviceHeader}>
-        <View style={styles.deviceIconContainer}>
-          <LinearGradient
-            colors={['#9B5DE5', '#7C3AED']}
-            style={styles.deviceIconGradient}
-          >
-            <MaterialIcons 
-              name={item.targetDevice?.type === 'PHONE' ? 'smartphone' : 'laptop'} 
-              size={28} 
-              color="#fff" 
-            />
-          </LinearGradient>
-        </View>
-        
-        <View style={styles.deviceInfo}>
-          <Text style={[styles.deviceName, isDark && styles.textDark]}>
-            {item.targetDevice?.name}
-          </Text>
-          <View style={styles.deviceMeta}>
-            <View style={[styles.statusBadge, { backgroundColor: '#10B98120' }]}>
-              <View style={styles.statusDot} />
-              <Text style={styles.statusText}>Active</Text>
-            </View>
-            <View style={styles.methodBadge}>
-              <MaterialIcons name="sync" size={14} color="#9B5DE5" />
-              <Text style={styles.methodText}>{item.method?.toUpperCase()}</Text>
+  const renderPairedDevice = ({ item, index }) => {
+    const isSyncing = syncingDevices.has(item.id);
+    const latestRecording = latestRecordings[item.id];
+    
+    return (
+      <Animated.View
+        style={[
+          styles.deviceCard,
+          isDark && styles.deviceCardDark,
+          {
+            opacity: fadeAnim,
+            transform: [{
+              translateY: slideAnim.interpolate({
+                inputRange: [0, 30],
+                outputRange: [0, index * 5],
+              }),
+            }],
+          },
+        ]}
+      >
+        <View style={styles.deviceHeader}>
+          <View style={styles.deviceIconContainer}>
+            <LinearGradient
+              colors={['#9B5DE5', '#7C3AED']}
+              style={styles.deviceIconGradient}
+            >
+              <MaterialIcons 
+                name={item.targetDevice?.type === 'PHONE' ? 'smartphone' : 'laptop'} 
+                size={28} 
+                color="#fff" 
+              />
+            </LinearGradient>
+          </View>
+          
+          <View style={styles.deviceInfo}>
+            <Text style={[styles.deviceName, isDark && styles.textDark]}>
+              {item.targetDevice?.name}
+            </Text>
+            <View style={styles.deviceMeta}>
+              <View style={[styles.statusBadge, { backgroundColor: '#10B98120' }]}>
+                <View style={styles.statusDot} />
+                <Text style={styles.statusText}>Active</Text>
+              </View>
+              <View style={styles.methodBadge}>
+                <MaterialIcons 
+                  name={item.method === 'code' ? 'pin' : 'bluetooth'} 
+                  size={14} 
+                  color="#9B5DE5" 
+                />
+                <Text style={styles.methodText}>{item.method?.toUpperCase()}</Text>
+              </View>
             </View>
           </View>
+
+          <TouchableOpacity
+            style={styles.unpairButton}
+            onPress={() => unpairDevice(item.id, item.targetDevice?.name)}
+          >
+            <MaterialIcons name="delete-outline" size={24} color="#EF4444" />
+          </TouchableOpacity>
         </View>
 
-        <TouchableOpacity
-          style={styles.unpairButton}
-          onPress={() => unpairDevice(item.id, item.targetDevice?.name)}
-        >
-          <MaterialIcons name="delete-outline" size={24} color="#EF4444" />
-        </TouchableOpacity>
-      </View>
+        {/* Latest Recording Info */}
+        {latestRecording && (
+          <View style={styles.recordingInfo}>
+            <MaterialIcons name="mic" size={16} color="#6B7280" />
+            <Text style={[styles.recordingInfoText, isDark && styles.textSecondaryDark]} numberOfLines={1}>
+              Latest: {latestRecording.title}
+            </Text>
+          </View>
+        )}
 
-      <View style={styles.deviceFooter}>
-        <View style={styles.deviceStat}>
-          <MaterialIcons name="sync" size={16} color="#6B7280" />
-          <Text style={styles.deviceStatText}>Last sync: Just now</Text>
+        <View style={styles.deviceFooter}>
+          <View style={styles.deviceStat}>
+            <MaterialIcons name="sync" size={16} color="#6B7280" />
+            <Text style={[styles.deviceStatText, isDark && styles.textSecondaryDark]}>
+              {item.lastSync ? 'Synced recently' : 'Never synced'}
+            </Text>
+          </View>
+          
+          {latestRecording && (
+            <TouchableOpacity 
+              style={[styles.syncButton, isSyncing && styles.syncButtonDisabled]}
+              onPress={() => syncRecordingFromDevice(item, latestRecording)}
+              disabled={isSyncing}
+            >
+              {isSyncing ? (
+                <ActivityIndicator size="small" color="#9B5DE5" />
+              ) : (
+                <>
+                  <MaterialIcons name="cloud-download" size={16} color="#9B5DE5" />
+                  <Text style={styles.syncButtonText}>Sync Now</Text>
+                </>
+              )}
+            </TouchableOpacity>
+          )}
         </View>
-        <TouchableOpacity style={styles.syncButton}>
-          <Text style={styles.syncButtonText}>Sync Now</Text>
-        </TouchableOpacity>
-      </View>
-    </Animated.View>
-  );
+      </Animated.View>
+    );
+  };
 
-  const renderAvailableDevice = ({ item }) => (
-    <TouchableOpacity
-      style={[styles.availableCard, isDark && styles.availableCardDark]}
-      onPress={() => pairDevice(item, 'wifi')}
-    >
-      <MaterialIcons 
-        name={item.type === 'PHONE' ? 'smartphone' : 'laptop'} 
-        size={32} 
-        color="#e67e22" 
-      />
-      <View style={styles.availableInfo}>
-        <Text style={[styles.availableName, isDark && styles.textDark]}>
-          {item.name}
-        </Text>
-        <Text style={[styles.availableDetails, isDark && styles.textSecondaryDark]}>
-          {item.os} • {item.networkType}
-        </Text>
-      </View>
-      <MaterialIcons name="add-circle" size={28} color="#10B981" />
-    </TouchableOpacity>
-  );
+  const formatRelativeTime = (timestamp) => {
+    if (!timestamp) return 'Unknown';
+    const date = timestamp.toDate();
+    const now = new Date();
+    const diff = now - date;
+    const minutes = Math.floor(diff / 60000);
+    
+    if (minutes < 1) return 'Just now';
+    if (minutes < 60) return `${minutes}m ago`;
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return `${hours}h ago`;
+    return `${Math.floor(hours / 24)}d ago`;
+  };
 
   // ==================== MAIN RENDER ====================
   return (
@@ -525,6 +707,14 @@ export default function PairedDevicesScreen({ navigation, route }) {
           <Text style={styles.headerSubtitle}>
             {pairedDevices.length} device{pairedDevices.length !== 1 ? 's' : ''} connected
           </Text>
+          
+          {/* Network Status Badge */}
+          {!isOnline && (
+            <View style={styles.offlineBadge}>
+              <MaterialIcons name="cloud-off" size={14} color="#EF4444" />
+              <Text style={styles.offlineText}>Offline - Use Bluetooth</Text>
+            </View>
+          )}
         </View>
       </LinearGradient>
 
@@ -567,8 +757,14 @@ export default function PairedDevicesScreen({ navigation, route }) {
             </View>
             <View style={styles.currentDeviceDetails}>
               <View style={styles.detailRow}>
-                <MaterialIcons name="wifi" size={16} color="#6B7280" />
-                <Text style={styles.detailText}>{deviceInfo.ipAddress}</Text>
+                <MaterialIcons 
+                  name={isOnline ? "wifi" : "wifi-off"} 
+                  size={16} 
+                  color={isOnline ? "#10B981" : "#EF4444"} 
+                />
+                <Text style={[styles.detailText, !isOnline && { color: '#EF4444' }]}>
+                  {isOnline ? deviceInfo.ipAddress : "Offline"}
+                </Text>
               </View>
               <View style={styles.detailRow}>
                 <MaterialIcons name="info" size={16} color="#6B7280" />
@@ -621,7 +817,7 @@ export default function PairedDevicesScreen({ navigation, route }) {
               No Paired Devices
             </Text>
             <Text style={[styles.emptyText, isDark && styles.textSecondaryDark]}>
-              Pair devices to sync lecture notes and collaborate in real-time
+              Pair with devices at the front of class to get clear audio and sync recordings in real-time
             </Text>
           </View>
         )}
@@ -630,7 +826,7 @@ export default function PairedDevicesScreen({ navigation, route }) {
         <View style={[styles.infoBox, isDark && styles.infoBoxDark]}>
           <MaterialIcons name="info-outline" size={22} color="#3B82F6" />
           <Text style={[styles.infoText, isDark && styles.textDark]}>
-            Students can pair with a device at the front of the class for better audio quality and real-time transcription sharing.
+            <Text style={{ fontWeight: '700' }}>How it works:</Text> Students sitting far from the speaker can pair with a device at the front to receive better audio quality and real-time transcriptions. The front device captures clear audio while paired devices receive synced recordings.
           </Text>
         </View>
       </ScrollView>
@@ -646,168 +842,153 @@ export default function PairedDevicesScreen({ navigation, route }) {
           <View style={[styles.modalContent, isDark && styles.modalContentDark]}>
             <View style={styles.modalHeader}>
               <Text style={[styles.modalTitle, isDark && styles.textDark]}>
-                Choose Pairing Method
+                Pair New Device
               </Text>
-              <TouchableOpacity onPress={() => setShowPairModal(false)}>
+              <TouchableOpacity onPress={() => {
+                setShowPairModal(false);
+                setConnectionCode("");
+                setCodeInput("");
+              }}>
                 <MaterialIcons name="close" size={28} color="#6B7280" />
               </TouchableOpacity>
             </View>
 
             <ScrollView showsVerticalScrollIndicator={false}>
+              {/* Primary Method - 6-Digit Code */}
               {renderPairMethodCard(
-                'qr-code-scanner',
-                'QR Code',
-                'Scan QR code to pair instantly',
-                'qr',
-                '#9B5DE5'
+                'pin',
+                '6-Digit Code',
+                'Quick & secure pairing with code',
+                'code',
+                '#10B981',
+                'PRIMARY'
               )}
-              
-              {renderPairMethodCard(
-                'wifi',
-                'Wi-Fi Direct',
-                'Connect via local network',
-                'wifi',
-                '#e67e22'
+
+              {/* Show Generated Code */}
+              {connectionCode && (
+                <Animated.View 
+                  style={[
+                    styles.generatedCodeContainer,
+                    isDark && styles.generatedCodeContainerDark,
+                    { transform: [{ scale: codeFlashAnim }] }
+                  ]}
+                >
+                  <View style={styles.codeHeader}>
+                    <MaterialIcons name="check-circle" size={20} color="#10B981" />
+                    <Text style={[styles.codeHeaderText, isDark && styles.textDark]}>
+                      Your Pairing Code
+                    </Text>
+                  </View>
+                  
+                  <View style={styles.codeDisplay}>
+                    <LinearGradient
+                      colors={['#10B981', '#059669']}
+                      style={styles.codeGradient}
+                    >
+                      <Text style={styles.codeText}>{connectionCode}</Text>
+                    </LinearGradient>
+                  </View>
+
+                  <View style={styles.codeTimer}>
+                    <MaterialIcons name="timer" size={16} color="#EF4444" />
+                    <Text style={styles.codeTimerText}>Expires in 5 minutes</Text>
+                  </View>
+
+                  <Text style={[styles.codeInstruction, isDark && styles.textSecondaryDark]}>
+                    Share this code with the other device to complete pairing
+                  </Text>
+                </Animated.View>
               )}
-              
+
+              {/* Code Input Section */}
+              <View style={[styles.codeInputSection, isDark && styles.codeInputSectionDark]}>
+                <View style={styles.inputHeader}>
+                  <MaterialIcons name="keyboard" size={20} color="#9B5DE5" />
+                  <Text style={[styles.inputHeaderText, isDark && styles.textDark]}>
+                    Or Enter Code from Another Device
+                  </Text>
+                </View>
+
+                <View style={styles.codeInputContainer}>
+                  <TextInput
+                    style={[styles.codeInput, isDark && styles.codeInputDark]}
+                    placeholder="Enter 6-digit code"
+                    placeholderTextColor="#9CA3AF"
+                    value={codeInput}
+                    onChangeText={(text) => setCodeInput(text.replace(/[^0-9]/g, ''))}
+                    maxLength={6}
+                    keyboardType="number-pad"
+                    autoCorrect={false}
+                  />
+                  <TouchableOpacity
+                    style={[
+                      styles.submitCodeButton, 
+                      (isSubmittingCode || codeInput.length !== 6) && styles.submitCodeButtonDisabled
+                    ]}
+                    onPress={() => pairWithCode(codeInput)}
+                    disabled={isSubmittingCode || codeInput.length !== 6}
+                  >
+                    {isSubmittingCode ? (
+                      <ActivityIndicator size="small" color="#fff" />
+                    ) : (
+                      <MaterialIcons name="arrow-forward" size={24} color="#fff" />
+                    )}
+                  </TouchableOpacity>
+                </View>
+              </View>
+
+              {/* Divider */}
+              <View style={styles.divider}>
+                <View style={styles.dividerLine} />
+                <Text style={styles.dividerText}>OTHER METHODS</Text>
+                <View style={styles.dividerLine} />
+              </View>
+
+              {/* Bluetooth Method */}
               {renderPairMethodCard(
                 'bluetooth',
                 'Bluetooth',
-                'Pair using Bluetooth connection',
+                'For offline mode & microphones',
                 'bluetooth',
-                '#3B82F6'
+                '#3B82F6',
+                isOnline ? 'COMING SOON' : 'OFFLINE'
               )}
 
-              {renderPairMethodCard(
-                'pin',
-                'Connection Code',
-                'Enter 6-digit pairing code',
-                'code',
-                '#10B981'
-              )}
-
-              {/* Available Devices (WiFi scan) */}
-              {selectedPairMethod === 'wifi' && (
-                <View style={styles.scanSection}>
-                  <View style={styles.scanHeader}>
-                    <Text style={[styles.scanTitle, isDark && styles.textDark]}>
-                      Available Devices
-                    </Text>
-                    {scanning && (
-                      <Animated.View style={{ transform: [{ rotate: scanRotate }] }}>
-                        <MaterialIcons name="sync" size={24} color="#9B5DE5" />
-                      </Animated.View>
-                    )}
-                  </View>
-                  
-                  {scanning ? (
-                    <View style={styles.scanningContainer}>
-                      <ActivityIndicator size="large" color="#9B5DE5" />
-                      <Text style={styles.scanningText}>Scanning for devices...</Text>
+              {/* QR Code - Coming Soon */}
+              <TouchableOpacity
+                style={[styles.methodCard, styles.disabledMethodCard, isDark && styles.methodCardDark]}
+                disabled={true}
+              >
+                <LinearGradient
+                  colors={['#9CA3AF20', '#9CA3AF10']}
+                  style={styles.methodIconContainer}
+                >
+                  <MaterialIcons name="qr-code-scanner" size={36} color="#9CA3AF" />
+                </LinearGradient>
+                <View style={{ flex: 1 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                    <Text style={[styles.methodTitle, { color: '#9CA3AF' }]}>QR Code</Text>
+                    <View style={styles.comingSoonBadge}>
+                      <Text style={styles.comingSoonText}>COMING SOON</Text>
                     </View>
-                  ) : availableDevices.length > 0 ? (
-                    <FlatList
-                      data={availableDevices}
-                      keyExtractor={(item) => item.id}
-                      renderItem={renderAvailableDevice}
-                      scrollEnabled={false}
-                    />
-                  ) : (
-                    <Text style={styles.noDevicesText}>
-                      No devices found. Make sure devices are on the same network.
-                    </Text>
-                  )}
+                  </View>
+                  <Text style={[styles.methodDescription, { color: '#9CA3AF' }]}>
+                    Scan QR code for instant pairing
+                  </Text>
                 </View>
-              )}
+              </TouchableOpacity>
+
+              {/* Security Notice */}
+              <View style={[styles.securityNotice, isDark && styles.securityNoticeDark]}>
+                <MaterialIcons name="security" size={18} color="#10B981" />
+                <Text style={[styles.securityText, isDark && styles.textSecondaryDark]}>
+                  <Text style={{ fontWeight: '700' }}>Secure Pairing:</Text> All pairing codes are encrypted, expire after 5 minutes, and can only be used once for maximum security.
+                </Text>
+              </View>
             </ScrollView>
           </View>
         </View>
       </Modal>
-
-      {/* QR Code Modal */}
-      <Modal
-        visible={showQRModal}
-        animationType="fade"
-        transparent={true}
-        onRequestClose={() => setShowQRModal(false)}
-      >
-        <View style={styles.qrModalOverlay}>
-          <View style={[styles.qrModalContent, isDark && styles.qrModalContentDark]}>
-            <TouchableOpacity
-              style={styles.qrCloseButton}
-              onPress={() => setShowQRModal(false)}
-            >
-              <MaterialIcons name="close" size={28} color="#fff" />
-            </TouchableOpacity>
-
-            <Text style={styles.qrTitle}>Connection Code</Text>
-            <Text style={styles.qrSubtitle}>
-              Share this code with another device
-            </Text>
-
-            <View style={styles.codeContainer}>
-              <LinearGradient
-                colors={['#9B5DE5', '#7C3AED']}
-                style={styles.codeGradient}
-              >
-                <Text style={styles.codeText}>{connectionCode}</Text>
-              </LinearGradient>
-            </View>
-
-            <Text style={styles.qrExpiry}>Code expires in 5 minutes</Text>
-
-            <View style={styles.qrDivider}>
-              <View style={styles.qrDividerLine} />
-              <Text style={styles.qrDividerText}>OR</Text>
-              <View style={styles.qrDividerLine} />
-            </View>
-
-            <Text style={styles.qrInputTitle}>Enter Code from Another Device</Text>
-            
-            <View style={styles.codeInputContainer}>
-              <TextInput
-                style={[styles.codeInput, isDark && styles.codeInputDark]}
-                placeholder="Enter 6-digit code"
-                placeholderTextColor="#999"
-                value={codeInput}
-                onChangeText={(text) => setCodeInput(text.toUpperCase())}
-                maxLength={6}
-                autoCapitalize="characters"
-                autoCorrect={false}
-              />
-              <TouchableOpacity
-                style={[styles.submitCodeButton, isSubmittingCode && styles.submitCodeButtonDisabled]}
-                onPress={() => pairWithCode(codeInput)}
-                disabled={isSubmittingCode || codeInput.length !== 6}
-              >
-                {isSubmittingCode ? (
-                  <ActivityIndicator size="small" color="#fff" />
-                ) : (
-                  <MaterialIcons name="arrow-forward" size={24} color="#fff" />
-                )}
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
-
-      {/* QR Scanner Modal */}
-      {showQRScanner && (
-        <Modal
-          visible={showQRScanner}
-          animationType="slide"
-          onRequestClose={() => setShowQRScanner(false)}
-        >
-          <QRCodeScanner
-            onScan={(code) => {
-              setShowQRScanner(false);
-              pairWithCode(code);
-            }}
-            onClose={() => setShowQRScanner(false)}
-            isDark={isDark}
-          />
-        </Modal>
-      )}
     </View>
   );
 }
@@ -829,17 +1010,6 @@ const styles = StyleSheet.create({
     borderBottomLeftRadius: 32,
     borderBottomRightRadius: 32,
   },
-  backButton: {
-    position: "absolute",
-    left: 24,
-    top: 60,
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: "rgba(255,255,255,0.2)",
-    alignItems: "center",
-    justifyContent: "center",
-  },
   headerContent: {
     alignItems: "center",
     marginTop: 20,
@@ -854,6 +1024,21 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: "rgba(255,255,255,0.9)",
     marginTop: 6,
+  },
+  offlineBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: 'rgba(239, 68, 68, 0.2)',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 12,
+    marginTop: 10,
+  },
+  offlineText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#FEE2E2',
   },
 
   // Content
@@ -1051,6 +1236,22 @@ const styles = StyleSheet.create({
   unpairButton: {
     padding: 8,
   },
+  recordingInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    backgroundColor: '#F9FAFB',
+    borderRadius: 8,
+    marginBottom: 8,
+  },
+  recordingInfoText: {
+    flex: 1,
+    fontSize: 12,
+    color: '#6B7280',
+    fontWeight: '500',
+  },
   deviceFooter: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -1069,10 +1270,16 @@ const styles = StyleSheet.create({
     color: "#6B7280",
   },
   syncButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
     backgroundColor: "#9B5DE520",
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 8,
+  },
+  syncButtonDisabled: {
+    opacity: 0.5,
   },
   syncButtonText: {
     fontSize: 13,
@@ -1148,7 +1355,7 @@ const styles = StyleSheet.create({
     paddingTop: 24,
     paddingHorizontal: 24,
     paddingBottom: 40,
-    maxHeight: height * 0.8,
+    maxHeight: height * 0.85,
   },
   modalContentDark: {
     backgroundColor: "#1E293B",
@@ -1167,11 +1374,13 @@ const styles = StyleSheet.create({
 
   // Method Cards
   methodCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 16,
     backgroundColor: "#F9FAFB",
     borderRadius: 16,
     padding: 20,
     marginBottom: 16,
-    alignItems: "center",
     borderWidth: 2,
     borderColor: "#E5E7EB",
   },
@@ -1179,208 +1388,204 @@ const styles = StyleSheet.create({
     backgroundColor: "#0F172A",
     borderColor: "#374151",
   },
+  disabledMethodCard: {
+    opacity: 0.6,
+  },
   methodIconContainer: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
+    width: 64,
+    height: 64,
+    borderRadius: 32,
     alignItems: "center",
     justifyContent: "center",
-    marginBottom: 16,
   },
   methodTitle: {
     fontSize: 18,
     fontWeight: "700",
     color: "#1F2937",
-    marginBottom: 6,
   },
   methodDescription: {
     fontSize: 14,
     color: "#6B7280",
-    textAlign: "center",
+    marginTop: 4,
+  },
+  badge: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
+    backgroundColor: '#9CA3AF20',
+  },
+  primaryBadge: {
+    backgroundColor: '#10B98120',
+  },
+  badgeText: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#10B981',
+  },
+  comingSoonBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
+    backgroundColor: '#9CA3AF20',
+  },
+  comingSoonText: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#9CA3AF',
   },
 
-  // Available Devices
-  availableCard: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "#fff",
-    borderRadius: 12,
-    padding: 16,
-    marginTop: 12,
-    borderWidth: 1,
-    borderColor: "#E5E7EB",
-  },
-  availableCardDark: {
-    backgroundColor: "#0F172A",
-    borderColor: "#374151",
-  },
-  availableInfo: {
-    flex: 1,
-    marginLeft: 12,
-  },
-  availableName: {
-    fontSize: 16,
-    fontWeight: "600",
-    color: "#1F2937",
-    marginBottom: 4,
-  },
-  availableDetails: {
-    fontSize: 13,
-    color: "#6B7280",
-  },
-
-  // Scan Section
-  scanSection: {
-    marginTop: 20,
-  },
-  scanHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 16,
-  },
-  scanTitle: {
-    fontSize: 18,
-    fontWeight: "700",
-    color: "#1F2937",
-  },
-  scanningContainer: {
-    alignItems: "center",
-    paddingVertical: 40,
-  },
-  scanningText: {
-    marginTop: 12,
-    fontSize: 14,
-    color: "#6B7280",
-  },
-  noDevicesText: {
-    fontSize: 14,
-    color: "#6B7280",
-    textAlign: "center",
-    paddingVertical: 20,
-  },
-
-  // QR Modal
-  qrModalOverlay: {
-    flex: 1,
-    backgroundColor: "rgba(0,0,0,0.85)",
-    justifyContent: "center",
-    alignItems: "center",
+  // Generated Code Container
+  generatedCodeContainer: {
+    backgroundColor: '#ECFDF5',
+    borderRadius: 20,
     padding: 24,
+    marginBottom: 20,
+    borderWidth: 2,
+    borderColor: '#10B981',
   },
-  qrModalContent: {
-    backgroundColor: "#fff",
-    borderRadius: 24,
-    padding: 32,
-    width: "100%",
-    maxWidth: 400,
-    alignItems: "center",
+  generatedCodeContainerDark: {
+    backgroundColor: '#064E3B',
+    borderColor: '#059669',
   },
-  qrModalContentDark: {
-    backgroundColor: "#1E293B",
-  },
-  qrCloseButton: {
-    position: "absolute",
-    top: 16,
-    right: 16,
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: "rgba(107,114,128,0.2)",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  qrTitle: {
-    fontSize: 24,
-    fontWeight: "800",
-    color: "#1F2937",
-    marginBottom: 8,
-  },
-  qrSubtitle: {
-    fontSize: 14,
-    color: "#6B7280",
-    marginBottom: 32,
-    textAlign: "center",
-  },
-  codeContainer: {
-    borderRadius: 20,
-    overflow: "hidden",
+  codeHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
     marginBottom: 16,
   },
-  codeGradient: {
-    paddingVertical: 24,
-    paddingHorizontal: 40,
-  },
-  codeText: {
-    fontSize: 48,
-    fontWeight: "900",
-    color: "#fff",
-    letterSpacing: 8,
-    textAlign: "center",
-  },
-  qrExpiry: {
-    fontSize: 13,
-    color: "#EF4444",
-    fontWeight: "600",
-    marginBottom: 24,
-  },
-  qrDivider: {
-    flexDirection: "row",
-    alignItems: "center",
-    width: "100%",
-    marginVertical: 24,
-  },
-  qrDividerLine: {
-    flex: 1,
-    height: 1,
-    backgroundColor: "#E5E7EB",
-  },
-  qrDividerText: {
-    marginHorizontal: 16,
-    fontSize: 14,
-    color: "#6B7280",
-    fontWeight: "600",
-  },
-  qrInputTitle: {
+  codeHeaderText: {
     fontSize: 16,
-    fontWeight: "700",
-    color: "#1F2937",
+    fontWeight: '700',
+    color: '#047857',
+  },
+  codeDisplay: {
+    borderRadius: 16,
+    overflow: 'hidden',
     marginBottom: 12,
   },
+  codeGradient: {
+    paddingVertical: 20,
+    paddingHorizontal: 32,
+    alignItems: 'center',
+  },
+  codeText: {
+    fontSize: 44,
+    fontWeight: '900',
+    color: '#fff',
+    letterSpacing: 12,
+    textAlign: 'center',
+  },
+  codeTimer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    marginBottom: 8,
+  },
+  codeTimerText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#EF4444',
+  },
+  codeInstruction: {
+    fontSize: 13,
+    color: '#047857',
+    textAlign: 'center',
+    fontWeight: '500',
+  },
+
+  // Code Input Section
+  codeInputSection: {
+    backgroundColor: '#F9FAFB',
+    borderRadius: 16,
+    padding: 20,
+    marginBottom: 20,
+  },
+  codeInputSectionDark: {
+    backgroundColor: '#374151',
+  },
+  inputHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 16,
+  },
+  inputHeaderText: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#1F2937',
+  },
   codeInputContainer: {
-    flexDirection: "row",
-    alignItems: "center",
+    flexDirection: 'row',
+    alignItems: 'center',
     gap: 12,
-    width: "100%",
   },
   codeInput: {
     flex: 1,
-    backgroundColor: "#F9FAFB",
+    backgroundColor: '#FFFFFF',
     borderRadius: 12,
     paddingHorizontal: 16,
     paddingVertical: 14,
-    fontSize: 18,
-    fontWeight: "700",
-    letterSpacing: 4,
-    textAlign: "center",
+    fontSize: 20,
+    fontWeight: '700',
+    letterSpacing: 6,
+    textAlign: 'center',
     borderWidth: 2,
-    borderColor: "#E5E7EB",
+    borderColor: '#E5E7EB',
   },
   codeInputDark: {
-    backgroundColor: "#0F172A",
-    borderColor: "#374151",
-    color: "#F3F4F6",
+    backgroundColor: '#0F172A',
+    borderColor: '#4B5563',
+    color: '#F3F4F6',
   },
   submitCodeButton: {
     width: 48,
     height: 48,
     borderRadius: 24,
-    backgroundColor: "#10B981",
-    alignItems: "center",
-    justifyContent: "center",
+    backgroundColor: '#10B981',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   submitCodeButtonDisabled: {
-    backgroundColor: "#9CA3AF",
+    backgroundColor: '#9CA3AF',
+  },
+
+  // Divider
+  divider: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginVertical: 24,
+  },
+  dividerLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: '#E5E7EB',
+  },
+  dividerText: {
+    marginHorizontal: 16,
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#9CA3AF',
+  },
+
+  // Security Notice
+  securityNotice: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+    backgroundColor: '#ECFDF5',
+    padding: 16,
+    borderRadius: 12,
+    marginTop: 8,
+  },
+  securityNoticeDark: {
+    backgroundColor: '#064E3B',
+  },
+  securityText: {
+    flex: 1,
+    fontSize: 12,
+    color: '#047857',
+    lineHeight: 18,
   },
 
   // Text Colors
@@ -1391,4 +1596,3 @@ const styles = StyleSheet.create({
     color: "#9CA3AF",
   },
 });
-
