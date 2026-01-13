@@ -705,6 +705,8 @@ export default function HomeScreen() {
       "Keep the momentum going! 🔥",
       "Learning never stops! 📚",
       "Stay curious, stay motivated! 🌟",
+      "Your dedication is inspiring! 💡",
+      "One step at a time, one note at a time! 📝",
     ];
     const hour = new Date().getHours();
     return quotes[hour % quotes.length];
@@ -920,14 +922,14 @@ export default function HomeScreen() {
         gradient: ["#FF6B6B", "#FF8E53"] 
       },
       { 
-        icon: "book", 
+        icon: "library-books", 
         label: "Notes", 
         value: notesCount.toString(), 
         color: "#4ECDC4", 
         gradient: ["#4ECDC4", "#44A08D"] 
       },
       { 
-        icon: "psychology", 
+        icon: "quiz", 
         label: "Quizzes", 
         value: quizzesCount.toString(), 
         color: "#FFD93D", 
