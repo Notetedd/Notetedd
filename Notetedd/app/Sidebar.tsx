@@ -201,8 +201,8 @@ export default function Sidebar({ isOpen, onClose, navigation }: SidebarProps) {
     {
       items: [
         { icon: "person", label: "My Profile", screen: "ProfileScreen" },
-        { icon: "star", label: "Subscription", screen: "SubscriptionPlanScreen", badge: isPremium ? "PRO" : null },
-        { icon: "credit-card", label: "Payment Methods", screen: "PaymentMethodsScreen" },
+        // { icon: "star", label: "Subscription", screen: "SubscriptionPlanScreen", badge: isPremium ? "PRO" : null },
+        // { icon: "credit-card", label: "Payment Methods", screen: "PaymentMethodsScreen" },
       ],
     },
     {
