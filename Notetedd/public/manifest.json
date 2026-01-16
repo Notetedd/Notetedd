@@ -1,7 +1,7 @@
 {
   "short_name": "Notetedd",
-  "name": "Notetedd",
-  "description": "Your smart learning tool",
+  "name": "Notetedd - Smart Learning Tool",
+  "description": "Your smart learning tool for better note-taking and study",
   "icons": [
     {
       "src": "/icon-192.png",
@@ -28,7 +28,7 @@
       "purpose": "maskable"
     },
     {
-      "src": "/icon.png",
+      "src": "/adaptive-icon.png",
       "type": "image/png",
       "sizes": "144x144",
       "purpose": "any"
@@ -40,18 +40,26 @@
   "orientation": "portrait-primary",
   "theme_color": "#000000",
   "background_color": "#ffffff",
+  "categories": [
+    "education",
+    "productivity"
+  ],
+  "lang": "en",
+  "dir": "ltr",
   "screenshots": [
     {
       "src": "/icon-192.png",
       "type": "image/png",
       "sizes": "192x192",
-      "form_factor": "narrow"
+      "form_factor": "narrow",
+      "label": "Notetedd app home screen"
     },
     {
-      "src": "/icon-144.png",
+      "src": "/adaptive-icon.png",
       "type": "image/png",
       "sizes": "144x144",
-      "form_factor": "wide"
+      "form_factor": "wide",
+      "label": "Notetedd app wide view"
     }
   ]
 }
