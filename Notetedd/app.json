@@ -56,7 +56,6 @@
           "scope": "/"
         }
       ],
-      
       [
         "expo-audio",
         {
@@ -64,7 +63,8 @@
         }
       ],
       "expo-image-picker",
-      "expo-video"
+      "expo-video",
+      "expo-build-properties"
     ],
     "experiments": {
       "typedRoutes": true,
