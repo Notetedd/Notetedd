@@ -26,17 +26,18 @@ import PaymentMethodsScreen from "./PaymentMethodsScreen";
 import SubscriptionPlanScreen from "./SubscriptionPlanScreen";
 import ResetPasswordScreen from "./ResetPasswordScreen";
 
+
 // RevenueCat Screens
-import PaywallScreen from './PaywallScreen';
-import CustomerCenterScreen from './CustomerCenterScreen';
-import CustomSubscriptionScreen from './CustomSubscriptionScreen';
+// import PaywallScreen from './PaywallScreen';
+// import CustomerCenterScreen from './CustomerCenterScreen';
+// import CustomSubscriptionScreen from './CustomSubscriptionScreen';
 
 // Contexts
 import ThemeProvider, { useTheme } from "./context/ThemeContext";
-import { SubscriptionProvider } from "./context/SubscriptionContext";
+// import { SubscriptionProvider } from "./context/SubscriptionContext";
 
 // RevenueCat Config
-import { initializeRevenueCat } from "./../RevenueCatConfig";
+// import { initializeRevenueCat } from "./../RevenueCatConfig";
 
 import { LogBox } from 'react-native';
 LogBox.ignoreAllLogs(); // optional
@@ -107,10 +108,10 @@ export default function App() {
   return (
     <ErrorBoundary>
       <ThemeProvider>
-        <SubscriptionProvider>
+        {/* <SubscriptionProvider> */}
           <AppContent />
           
-        </SubscriptionProvider>
+        {/* </SubscriptionProvider> */}
       </ThemeProvider>
     </ErrorBoundary>
   );
@@ -122,9 +123,9 @@ function AppContent() {
   const [isInitialized, setIsInitialized] = useState(false);
 
   // Initialize RevenueCat on app start
-  useEffect(() => {
-    initApp();
-  }, []);
+  // useEffect(() => {
+  //   initApp();
+  // }, []);
 
   // Service Worker registration (Web only)
   useEffect(() => {
@@ -142,23 +143,23 @@ function AppContent() {
     }
   }, []);
 
-  const initApp = async () => {
-    try {
-      // Initialize RevenueCat SDK
-      const success = await initializeRevenueCat();
+  // const initApp = async () => {
+  //   try {
+  //     // Initialize RevenueCat SDK
+  //     const success = await initializeRevenueCat();
       
-      if (success) {
-        console.log('✅ RevenueCat initialized successfully');
-      } else {
-        console.warn('⚠️ RevenueCat initialization failed - app will continue without subscription features');
-      }
-    } catch (error) {
-      console.error('❌ App initialization error:', error);
-      // App continues even if RevenueCat fails
-    } finally {
-      setIsInitialized(true);
-    }
-  };
+  //     if (success) {
+  //       console.log('✅ RevenueCat initialized successfully');
+  //     } else {
+  //       console.warn('⚠️ RevenueCat initialization failed - app will continue without subscription features');
+  //     }
+  //   } catch (error) {
+  //     console.error('❌ App initialization error:', error);
+  //     // App continues even if RevenueCat fails
+  //   } finally {
+  //     setIsInitialized(true);
+  //   }
+  // };
 
   // Show loading screen while initializing
   if (!isInitialized) {
@@ -295,7 +296,7 @@ function AppContent() {
           />
 
           {/* ==================== REVENUECAT SCREENS ==================== */}
-          <Stack.Screen 
+          {/* <Stack.Screen 
             name="PaywallScreen" 
             component={PaywallScreen}
             options={{ 
@@ -318,9 +319,10 @@ function AppContent() {
               headerShown: false,
               presentation: 'modal' 
             }}
-          />
+          /> */}
         </Stack.Navigator>
         <Toast />
+        <InstallPWA />
       </NavigationContainer>
     </>
   );
