@@ -1,63 +1,27 @@
 import React, { useRef, useState, useEffect } from 'react';
-import { View, Text, StyleSheet, Dimensions, TouchableOpacity, Animated, ScrollView, Platform, Image } from 'react-native';
-import { Navigation, Zap } from 'lucide-react';
-import { navigate } from 'expo-router/build/global-state/routing';
-import {router} from 'expo-router';
+import { View, Text, StyleSheet, Dimensions, TouchableOpacity, Animated, ScrollView, Platform } from 'react-native';
+import { router } from 'expo-router';
+
 const { width, height } = Dimensions.get('window');
 const isSmallDevice = height < 700;
 const isTablet = width > 600;
 
 const OnboardingScreen = () => {
   const [currentIndex, setCurrentIndex] = useState(0);
-  const scrollX = useRef(new Animated.Value(0)).current;
-  const flatListRef = useRef(null);
-  const imageScale = useRef(new Animated.Value(0)).current;
-  const contentOpacity = useRef(new Animated.Value(0)).current;
+  const [isReady, setIsReady] = useState(false);
+  const scrollViewRef = useRef(null);
+  const imageScale = useRef(new Animated.Value(1)).current;
+  const contentOpacity = useRef(new Animated.Value(1)).current;
   const floatAnim = useRef(new Animated.Value(0)).current;
-
-  useEffect(() => {
-    // Animate in when slide changes
-    imageScale.setValue(0);
-    contentOpacity.setValue(0);
-
-    Animated.parallel([
-      Animated.spring(imageScale, {
-        toValue: 1,
-        friction: 8,
-        tension: 40,
-        useNativeDriver: true,
-      }),
-      Animated.timing(contentOpacity, {
-        toValue: 1,
-        duration: 800,
-        delay: 300,
-        useNativeDriver: true,
-      }),
-    ]).start();
-
-    // Floating animation
-    Animated.loop(
-      Animated.sequence([
-        Animated.timing(floatAnim, {
-          toValue: 1,
-          duration: 2000,
-          useNativeDriver: true,
-        }),
-        Animated.timing(floatAnim, {
-          toValue: 0,
-          duration: 2000,
-          useNativeDriver: true,
-        }),
-      ])
-    ).start();
-  }, [currentIndex]);
+  const scrollX = useRef(new Animated.Value(0)).current;
+  const mountedRef = useRef(false);
 
   const slides = [
     {
       id: '1',
       title: 'Record & Transcribe',
-      subtitle: 'Never Miss a Beat',
-      description: 'Transform lectures into text instantly. Sit, and watch your notes write themselves.',
+      subtitle: 'Never Miss a concept',
+      description: 'Transform audio from lectures into text instantly. Sit, and watch your notes write themselves.',
       accentColor: '#e67e22',
       imageEmoji: '🎙️',
       decorEmojis: ['🎵', '📝', '✨'],
@@ -67,7 +31,7 @@ const OnboardingScreen = () => {
       id: '2',
       title: 'Smart Organization',
       subtitle: 'Find Anything, Fast',
-      description: 'Your notes, sorted perfectly. Search in seconds, never lose track of what matters.',
+      description: 'Your notes, sorted perfectly. Search in seconds between text and audio notes.',
       accentColor: '#9B5DE5',
       imageEmoji: '📚',
       decorEmojis: ['🗂️', '🔍', '⚡'],
@@ -87,7 +51,7 @@ const OnboardingScreen = () => {
       id: '4',
       title: 'Always Synced',
       subtitle: 'Your Notes Everywhere',
-      description: 'Phone, laptop, tablet — your notes follow you. Cloud backup means never losing progress.',
+      description: 'Import from classroom to your Phone, laptop, tablet — your notes follow you. Cloud backup means never losing progress.',
       accentColor: '#9B5DE5',
       imageEmoji: '☁️',
       decorEmojis: ['📱', '💻', '⚡'],
@@ -95,127 +59,200 @@ const OnboardingScreen = () => {
     }
   ];
 
+  useEffect(() => {
+    // Initialize component
+    if (!mountedRef.current) {
+      mountedRef.current = true;
+      
+      // For web, we need a longer delay to ensure proper initialization
+      const initDelay = Platform.OS === 'web' ? 200 : 50;
+      
+      const timer = setTimeout(() => {
+        setIsReady(true);
+        
+        // Ensure we're at the first slide
+        if (scrollViewRef.current) {
+          scrollViewRef.current.scrollTo({
+            x: 0,
+            y: 0,
+            animated: false,
+          });
+        }
+        
+        // Start animations for first slide
+        startSlideAnimations();
+      }, initDelay);
+
+      return () => clearTimeout(timer);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (isReady) {
+      startSlideAnimations();
+    }
+  }, [currentIndex, isReady]);
+
+  const startSlideAnimations = () => {
+    // Reset animations
+    imageScale.setValue(0);
+    contentOpacity.setValue(0);
+
+    Animated.parallel([
+      Animated.spring(imageScale, {
+        toValue: 1,
+        friction: 8,
+        tension: 40,
+        useNativeDriver: true,
+      }),
+      Animated.timing(contentOpacity, {
+        toValue: 1,
+        duration: 800,
+        delay: 300,
+        useNativeDriver: true,
+      }),
+    ]).start();
+
+    // Floating animation
+    const floatingAnimation = Animated.loop(
+      Animated.sequence([
+        Animated.timing(floatAnim, {
+          toValue: 1,
+          duration: 2000,
+          useNativeDriver: true,
+        }),
+        Animated.timing(floatAnim, {
+          toValue: 0,
+          duration: 2000,
+          useNativeDriver: true,
+        }),
+      ])
+    );
+    floatingAnimation.start();
+
+    return () => floatingAnimation.stop();
+  };
+
+  const handleScroll = Animated.event(
+    [{ nativeEvent: { contentOffset: { x: scrollX } } }],
+    {
+      useNativeDriver: false,
+      listener: (event) => {
+        const offsetX = event.nativeEvent.contentOffset.x;
+        const index = Math.round(offsetX / width);
+        if (index !== currentIndex && index >= 0 && index < slides.length) {
+          setCurrentIndex(index);
+        }
+      },
+    }
+  );
+
+  const scrollToIndex = (index) => {
+    if (scrollViewRef.current) {
+      scrollViewRef.current.scrollTo({
+        x: index * width,
+        animated: true,
+      });
+    }
+  };
+
   const handleNext = () => {
     if (currentIndex < slides.length - 1) {
       const nextIndex = currentIndex + 1;
-      
-      // Use scrollTo for better web compatibility
-      if (Platform.OS === 'web') {
-        flatListRef.current?.scrollToOffset({ 
-          offset: nextIndex * width, 
-          animated: true 
-        });
-      } else {
-        flatListRef.current?.scrollToIndex({ 
-          index: nextIndex, 
-          animated: true 
-        });
-      }
-      
+      scrollToIndex(nextIndex);
       setCurrentIndex(nextIndex);
     }
   };
 
   const handleSkip = () => {
     const lastIndex = slides.length - 1;
-    
-    // Use scrollTo for better web compatibility
-    if (Platform.OS === 'web') {
-      flatListRef.current?.scrollToOffset({ 
-        offset: lastIndex * width, 
-        animated: true 
-      });
-    } else {
-      flatListRef.current?.scrollToIndex({ 
-        index: lastIndex, 
-        animated: true 
-      });
-    }
-    
+    scrollToIndex(lastIndex);
     setCurrentIndex(lastIndex);
   };
 
   const handleGetStarted = () => {
-    router.push('AuthScreen');
+    router.push('/AuthScreen');
   };
 
-  const renderSlide = ({ item, index }) => {
-    const floatY = floatAnim.interpolate({
-      inputRange: [0, 1],
-      outputRange: [0, -20],
-    });
+  const floatY = floatAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0, -20],
+  });
 
+  const renderSlide = (item, index) => {
     return (
-      <ScrollView 
-        style={styles.slideScroll}
-        contentContainerStyle={styles.slideScrollContent}
-        showsVerticalScrollIndicator={false}
-      >
-        <View style={styles.slide}>
-          {/* Accent Color Block */}
-          <View style={[styles.colorBlock, { backgroundColor: item.accentColor }]} />
-          
-          {/* Decorative Emojis */}
-          <View style={styles.decorContainer}>
-            <Text style={[styles.decorEmoji, styles.decor1]}>{item.decorEmojis[0]}</Text>
-            <Text style={[styles.decorEmoji, styles.decor2]}>{item.decorEmojis[1]}</Text>
-            <Text style={[styles.decorEmoji, styles.decor3]}>{item.decorEmojis[2]}</Text>
+      <View key={item.id} style={styles.slideWrapper}>
+        <ScrollView 
+          style={styles.slideScroll}
+          contentContainerStyle={styles.slideScrollContent}
+          showsVerticalScrollIndicator={false}
+        >
+          <View style={styles.slide}>
+            {/* Accent Color Block */}
+            <View style={[styles.colorBlock, { backgroundColor: item.accentColor }]} />
+            
+            {/* Decorative Emojis */}
+            <View style={styles.decorContainer}>
+              <Text style={[styles.decorEmoji, styles.decor1]}>{item.decorEmojis[0]}</Text>
+              <Text style={[styles.decorEmoji, styles.decor2]}>{item.decorEmojis[1]}</Text>
+              <Text style={[styles.decorEmoji, styles.decor3]}>{item.decorEmojis[2]}</Text>
+            </View>
+
+            {/* Main Image/Emoji */}
+            <Animated.View style={[
+              styles.imageContainer,
+              {
+                transform: [
+                  { scale: imageScale },
+                  { translateY: floatY },
+                ],
+              },
+            ]}>
+              <View style={[styles.emojiCircle, { borderColor: item.accentColor }]}>
+                <Text style={styles.mainEmoji}>{item.imageEmoji}</Text>
+              </View>
+            </Animated.View>
+
+            {/* Content */}
+            <Animated.View style={[styles.textContainer, { opacity: contentOpacity }]}>
+              <Text style={styles.title} numberOfLines={2}>
+                {item.title}
+              </Text>
+              <Text style={[styles.subtitle, { color: item.accentColor }]} numberOfLines={1}>
+                {item.subtitle}
+              </Text>
+              <Text style={styles.description} numberOfLines={isSmallDevice ? 3 : 4}>
+                {item.description}
+              </Text>
+
+              <View style={[styles.featuresContainer, { borderLeftColor: item.accentColor }]}>
+                {item.features.map((feature, idx) => (
+                  <Animated.View 
+                    key={idx} 
+                    style={[
+                      styles.featureItem,
+                      {
+                        opacity: contentOpacity,
+                        transform: [{
+                          translateX: contentOpacity.interpolate({
+                            inputRange: [0, 1],
+                            outputRange: [-30, 0],
+                          }),
+                        }],
+                      },
+                    ]}
+                  >
+                    <View style={[styles.featureDot, { backgroundColor: item.accentColor }]} />
+                    <Text style={styles.featureText} numberOfLines={1}>
+                      {feature}
+                    </Text>
+                  </Animated.View>
+                ))}
+              </View>
+            </Animated.View>
           </View>
-
-          {/* Main Image/Emoji */}
-          <Animated.View style={[
-            styles.imageContainer,
-            {
-              transform: [
-                { scale: imageScale },
-                { translateY: floatY },
-              ],
-            },
-          ]}>
-            <View style={[styles.emojiCircle, { borderColor: item.accentColor }]}>
-              <Text style={styles.mainEmoji}>{item.imageEmoji}</Text>
-            </View>
-          </Animated.View>
-
-          {/* Content */}
-          <Animated.View style={[styles.textContainer, { opacity: contentOpacity }]}>
-            <Text style={styles.title} numberOfLines={2}>
-              {item.title}
-            </Text>
-            <Text style={[styles.subtitle, { color: item.accentColor }]} numberOfLines={1}>
-              {item.subtitle}
-            </Text>
-            <Text style={styles.description} numberOfLines={isSmallDevice ? 3 : 4}>
-              {item.description}
-            </Text>
-
-            <View style={[styles.featuresContainer, { borderLeftColor: item.accentColor }]}>
-              {item.features.map((feature, idx) => (
-                <Animated.View 
-                  key={idx} 
-                  style={[
-                    styles.featureItem,
-                    {
-                      opacity: contentOpacity,
-                      transform: [{
-                        translateX: contentOpacity.interpolate({
-                          inputRange: [0, 1],
-                          outputRange: [-30, 0],
-                        }),
-                      }],
-                    },
-                  ]}
-                >
-                  <View style={[styles.featureDot, { backgroundColor: item.accentColor }]} />
-                  <Text style={styles.featureText} numberOfLines={1}>
-                    {feature}
-                  </Text>
-                </Animated.View>
-              ))}
-            </View>
-          </Animated.View>
-        </View>
-      </ScrollView>
+        </ScrollView>
+      </View>
     );
   };
 
@@ -259,6 +296,20 @@ const OnboardingScreen = () => {
     );
   };
 
+  // Show loading state until ready
+  if (!isReady) {
+    return (
+      <View style={styles.container}>
+        <View style={styles.header}>
+          <Text style={styles.logo} adjustsFontSizeToFit numberOfLines={1}>
+            Note<Text style={styles.logoAccent}>tedd</Text>
+          </Text>
+          <Text style={styles.tagline} numberOfLines={1}>Learning Redefined</Text>
+        </View>
+      </View>
+    );
+  }
+
   return (
     <View style={styles.container}>
       {/* Header */}
@@ -266,36 +317,25 @@ const OnboardingScreen = () => {
         <Text style={styles.logo} adjustsFontSizeToFit numberOfLines={1}>
           Note<Text style={styles.logoAccent}>tedd</Text>
         </Text>
-        <Text style={styles.tagline} numberOfLines={1}> Learning Redefined</Text>
+        <Text style={styles.tagline} numberOfLines={1}>Learning Redefined</Text>
       </View>
 
       {/* Slides */}
       <View style={styles.slidesContainer}>
-        <Animated.FlatList
-          ref={flatListRef}
-          data={slides}
-          renderItem={renderSlide}
+        <Animated.ScrollView
+          ref={scrollViewRef}
           horizontal
           pagingEnabled
           showsHorizontalScrollIndicator={false}
-          bounces={false}
-          keyExtractor={(item) => item.id}
-          onScroll={Animated.event(
-            [{ nativeEvent: { contentOffset: { x: scrollX } } }],
-            { useNativeDriver: false }
-          )}
-          onMomentumScrollEnd={(event) => {
-            const index = Math.round(event.nativeEvent.contentOffset.x / width);
-            setCurrentIndex(index);
-          }}
+          onScroll={handleScroll}
           scrollEventThrottle={16}
-          // Additional props for better web support
-          getItemLayout={(data, index) => ({
-            length: width,
-            offset: width * index,
-            index,
-          })}
-        />
+          bounces={false}
+          decelerationRate="fast"
+          snapToInterval={width}
+          snapToAlignment="center"
+        >
+          {slides.map((item, index) => renderSlide(item, index))}
+        </Animated.ScrollView>
       </View>
 
       {/* Pagination */}
@@ -327,8 +367,7 @@ const OnboardingScreen = () => {
             onPress={handleGetStarted}
             activeOpacity={0.85}
           >
-            <Text style={styles.getStartedText}>Get Started</Text>
-            {/* <Zap size={22} color="#000" fill="#000" style={{ marginLeft: 8 }} /> */}
+            <Text style={styles.getStartedText}>Get Started ⚡</Text>
           </TouchableOpacity>
         )}
       </View>
@@ -365,6 +404,9 @@ const styles = StyleSheet.create({
   },
   slidesContainer: {
     flex: 1,
+  },
+  slideWrapper: {
+    width: width,
   },
   slideScroll: {
     flex: 1,
