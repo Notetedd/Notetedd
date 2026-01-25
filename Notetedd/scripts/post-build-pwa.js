@@ -51,7 +51,7 @@ const manifestContent = {
       "purpose": "maskable"
     },
     {
-      "src": "/adaptive-icon.png",
+      "src": "/adaptive-icon.jpg",
       "type": "image/png",
       "sizes": "144x144",
       "purpose": "any"
@@ -75,7 +75,7 @@ const manifestContent = {
       "label": "Notetedd app home screen"
     },
     {
-      "src": "/adaptive-icon.png",
+      "src": "/adaptive-icon.jpg",
       "type": "image/png",
       "sizes": "144x144",
       "form_factor": "wide",
@@ -105,8 +105,8 @@ const urlsToCache = [
   '/icon-192.png',
   '/icon-512.png',
   '/icon.png',
-  '/adaptive-icon.png',
-  '/splash-bg.png',
+  '/adaptive-icon.jpg',
+  '/splash-bg.jpg',
   '/favicon.ico'
 ];
 
