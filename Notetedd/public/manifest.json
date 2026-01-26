@@ -28,7 +28,7 @@
       "purpose": "maskable"
     },
     {
-      "src": "/adaptive-icon.png",
+      "src": "/adaptive-icon.jpg",
       "type": "image/png",
       "sizes": "144x144",
       "purpose": "any"
@@ -55,7 +55,7 @@
       "label": "Notetedd app home screen"
     },
     {
-      "src": "/adaptive-icon.png",
+      "src": "/adaptive-icon.jpg",
       "type": "image/png",
       "sizes": "144x144",
       "form_factor": "wide",
