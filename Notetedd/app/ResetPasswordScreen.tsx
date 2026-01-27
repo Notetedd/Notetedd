@@ -238,7 +238,7 @@ export default function ResetPasswordScreen() {
       
       {/* Animated Background Gradient */}
       <LinearGradient
-        colors={["#9B5DE5", "#e67e22", "#d35400"]}
+        colors={[ "#e67e22", "#d35400"]}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
         style={styles.gradientBackground}
