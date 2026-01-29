@@ -88,9 +88,9 @@ export default function HelpSupportScreen({ navigation, route }) {
     {
       icon: "email",
       title: "Email Support",
-      subtitle: "notetedd@gmail.com",
+      subtitle: "info@notetedd.com",
       color: "#9B5DE5",
-      action: () => Linking.openURL("mailto:notetedd@gmail.com"),
+      action: () => Linking.openURL("mailto:info@notetedd.com"),
     },
     {
       icon: "chat",
@@ -116,10 +116,10 @@ export default function HelpSupportScreen({ navigation, route }) {
   ];
 
   const quickLinks = [
-    { icon: "menu-book", title: "User Guide", url: "https://docs.notetedd.com" },
+    { icon: "menu-book", title: "User Guide", url: "https://notetedd.com/features" },
     { icon: "play-circle", title: "Video Tutorials", url: "https://youtube.com/@notetedd" },
-    { icon: "bug-report", title: "Report a Bug", url: "https://bugs.notetedd.com" },
-    { icon: "lightbulb", title: "Feature Requests", url: "https://feedback.notetedd.com" },
+    { icon: "bug-report", title: "Report a Bug", url: "https://notetedd.com/contact" },
+    { icon: "lightbulb", title: "Feature Requests", url: "https://notetedd.com/contact" },
   ];
 
   const filteredFAQs = faqs.filter(faq => 
