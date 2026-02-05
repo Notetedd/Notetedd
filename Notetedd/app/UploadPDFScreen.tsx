@@ -40,7 +40,7 @@ export default function UploadPDFScreen({ navigation }) {
 
   // Gemini API Configuration
   const GEMINI_API_KEY = "AIzaSyCZVQqMteS8jSA_cAYOUS0XxzwHxzgIaNI";
-  const GEMINI_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent";
+  const GEMINI_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent";
 
   // Web-specific file upload handler
   const handleWebFileUpload = (event) => {
