@@ -1,38 +1,49 @@
-import React, { useEffect, useState, useRef } from "react";
-import { 
-  View, 
-  Text, 
-  ScrollView, 
-  StyleSheet, 
-  Alert,
-  TouchableOpacity,
-  Animated,
-  Share,
-  Clipboard,
-  RefreshControl,
-  TextInput,
-  Dimensions,
-  Modal,
-  FlatList,
-} from "react-native";
-import { LinearGradient } from "expo-linear-gradient";
-import MaterialIcons from "react-native-vector-icons/MaterialIcons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import haptics from "./utils/haptics";
-import { getFirestore, collection, query, where, orderBy, getDocs, doc, updateDoc, getDoc } from "firebase/firestore";
+import { LinearGradient } from "expo-linear-gradient";
 import { getAuth } from "firebase/auth";
+import {
+  collection,
+  doc,
+  getDoc,
+  getDocs,
+  getFirestore,
+  orderBy,
+  query,
+  updateDoc,
+  where,
+} from "firebase/firestore";
+import React, { useEffect, useRef, useState } from "react";
+import {
+  Alert,
+  Animated,
+  Clipboard,
+  Dimensions,
+  FlatList,
+  Modal,
+  RefreshControl,
+  ScrollView,
+  Share,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+} from "react-native";
+import MaterialIcons from "react-native-vector-icons/MaterialIcons";
 import { useTheme } from "./context/ThemeContext";
+import haptics from "./utils/haptics";
 import { logUserActivity } from "./utils/userActivity";
-
 
 const { width, height } = Dimensions.get("window");
 
-const GEMINI_API_KEY = "AIzaSyDQraKwy8C4zbRJ9ys2Xl9DUbzhvmv9Wco"; 
+const GEMINI_API_KEY = "AIzaSyDQraKwy8C4zbRJ9ys2Xl9DUbzhvmv9Wco";
 const GROQ_API_KEY = "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";
 
-const GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1/models/gemini-pro:generateContent";
+const GEMINI_API_URL =
+  "https://generativelanguage.googleapis.com/v1/models/gemini-pro:generateContent";
 const GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions";
 
+// I am implementing the enhanced NotesScreen with multi-view modes, academic field detection, and field-specific rendering.
 export default function EnhancedNotesScreen({ navigation, route }) {
   const { theme, colors } = useTheme();
   const isDark = theme === "dark";
@@ -52,6 +63,65 @@ export default function EnhancedNotesScreen({ navigation, route }) {
   const [expandedSections, setExpandedSections] = useState({});
   const [dataSource, setDataSource] = useState("");
   const [aiProvider, setAiProvider] = useState("");
+
+  // I am adding multi-view mode state (full, summary, organized)
+  const [viewMode, setViewMode] = useState("organized");
+
+  // I am adding academic field detection state
+  const [academicField, setAcademicField] = useState("general");
+
+  // I am adding toggles for field-specific sections
+  const [showFormulas, setShowFormulas] = useState(true);
+  const [showChemistry, setShowChemistry] = useState(true);
+  const [showCaseLaw, setShowCaseLaw] = useState(true);
+  // I am implementing academic field detection based on notes content
+  useEffect(() => {
+    if (notes) {
+      setAcademicField(detectAcademicField(notes));
+    }
+  }, [notes]);
+
+  // I am defining the academic field detection function
+  function detectAcademicField(notesData) {
+    if (!notesData) return "general";
+    // Medical/Biology
+    if (notesData.chemicalEquations && notesData.chemicalEquations.length > 0)
+      return "medical";
+    // Engineering/Math/Finance
+    if (
+      (notesData.formulas && notesData.formulas.length > 0) ||
+      (notesData.calculations && notesData.calculations.length > 0)
+    ) {
+      if (
+        notesData.formulas?.some((f) =>
+          /finance|interest|roi|market|investment/i.test(
+            f.name + f.applications,
+          ),
+        )
+      )
+        return "finance";
+      return "engineering";
+    }
+    // Law
+    if (notesData.caseLaw && notesData.caseLaw.length > 0) return "law";
+    return "general";
+  }
+
+  // I am providing a helper to get the icon for the academic field
+  function getFieldIcon(field) {
+    switch (field) {
+      case "medical":
+        return "science";
+      case "engineering":
+        return "engineering";
+      case "finance":
+        return "attach-money";
+      case "law":
+        return "gavel";
+      default:
+        return "school";
+    }
+  }
 
   // Lecture list state
   const [showLectureList, setShowLectureList] = useState(false);
@@ -87,7 +157,7 @@ export default function EnhancedNotesScreen({ navigation, route }) {
   useEffect(() => {
     console.log("📚 Enhanced NotesScreen mounted");
     console.log("🔍 Lecture ID from route:", lectureIdFromRoute);
-    
+
     Animated.parallel([
       Animated.timing(fadeAnim, {
         toValue: 1,
@@ -122,7 +192,7 @@ export default function EnhancedNotesScreen({ navigation, route }) {
   useEffect(() => {
     if (notes) {
       readStartRef.current = Date.now();
-      console.log('🕒 Note read timer started');
+      console.log("🕒 Note read timer started");
     }
 
     return () => {
@@ -130,20 +200,20 @@ export default function EnhancedNotesScreen({ navigation, route }) {
         if (readStartRef.current) {
           const elapsed = Date.now() - readStartRef.current;
           const TEN_MINUTES = 10 * 60 * 1000;
-          console.log('🕒 Note read timer stopped, elapsed ms:', elapsed);
+          console.log("🕒 Note read timer stopped, elapsed ms:", elapsed);
           if (elapsed >= TEN_MINUTES) {
             const currentUser = auth.currentUser;
             if (currentUser) {
-              logUserActivity(db, currentUser.uid, 'note_read', {
+              logUserActivity(db, currentUser.uid, "note_read", {
                 recordingId: currentRecordingId,
                 durationMs: elapsed,
               });
-              console.log('✅ Logged note_read activity');
+              console.log("✅ Logged note_read activity");
             }
           }
         }
       } catch (err) {
-        console.warn('Failed to log note_read activity:', err);
+        console.warn("Failed to log note_read activity:", err);
       } finally {
         readStartRef.current = null;
       }
@@ -169,7 +239,7 @@ export default function EnhancedNotesScreen({ navigation, route }) {
         console.log("✅ Using lecture data from route");
         setCurrentRecordingId(lectureId);
         setRawTranscription(lectureData.transcription || "");
-        
+
         if (lectureData.organizedNotes) {
           setNotes(lectureData.organizedNotes);
           setAiProvider(lectureData.organizedNotes.aiProvider || "cached");
@@ -177,7 +247,7 @@ export default function EnhancedNotesScreen({ navigation, route }) {
         } else if (lectureData.transcription) {
           await refineWithAI(lectureData.transcription, lectureId);
         }
-        
+
         setLoading(false);
         return;
       }
@@ -211,7 +281,6 @@ export default function EnhancedNotesScreen({ navigation, route }) {
 
       setDataSource("firestore");
       setLoading(false);
-
     } catch (error) {
       console.error("❌ Error loading specific lecture:", error);
       setError(error.message);
@@ -238,11 +307,11 @@ export default function EnhancedNotesScreen({ navigation, route }) {
       const q = query(
         recordingsRef,
         where("userId", "==", currentUser.uid),
-        orderBy("createdAt", "desc")
+        orderBy("createdAt", "desc"),
       );
 
       const querySnapshot = await getDocs(q);
-      
+
       if (querySnapshot.empty) {
         console.log("⚠️ No lectures found");
         setAllLectures([]);
@@ -253,12 +322,20 @@ export default function EnhancedNotesScreen({ navigation, route }) {
       }
 
       const lectures = [];
-      const colors = ["#9B5DE5", "#00B4D8", "#FF006E", "#FFD93D", "#10B981", "#EF4444", "#F59E0B"];
+      const colors = [
+        "#9B5DE5",
+        "#00B4D8",
+        "#FF006E",
+        "#FFD93D",
+        "#10B981",
+        "#EF4444",
+        "#F59E0B",
+      ];
 
       querySnapshot.forEach((doc, index) => {
         const data = doc.data();
         const createdAt = data.createdAt?.toDate() || new Date();
-        
+
         lectures.push({
           id: doc.id,
           title: data.organizedNotes?.title || data.title || "Untitled Lecture",
@@ -267,7 +344,10 @@ export default function EnhancedNotesScreen({ navigation, route }) {
           duration: data.duration ? Math.round(data.duration / 60) : 30,
           hasNotes: !!data.organizedNotes,
           color: colors[index % colors.length],
-          preview: data.organizedNotes?.summary?.substring(0, 100) || data.transcription?.substring(0, 100) || "No preview available",
+          preview:
+            data.organizedNotes?.summary?.substring(0, 100) ||
+            data.transcription?.substring(0, 100) ||
+            "No preview available",
         });
       });
 
@@ -276,7 +356,6 @@ export default function EnhancedNotesScreen({ navigation, route }) {
       setShowLectureList(true);
       setLoadingLectures(false);
       setLoading(false);
-
     } catch (error) {
       console.error("❌ Error loading lectures:", error);
       setLoadingLectures(false);
@@ -297,7 +376,7 @@ export default function EnhancedNotesScreen({ navigation, route }) {
     const days = Math.floor(diff / (1000 * 60 * 60 * 24));
 
     if (hours < 1) return "Just now";
-    if (hours < 24) return `${hours} hour${hours > 1 ? 's' : ''} ago`;
+    if (hours < 24) return `${hours} hour${hours > 1 ? "s" : ""} ago`;
     if (days === 1) return "Yesterday";
     if (days < 7) return `${days} days ago`;
     if (days < 30) return `${Math.floor(days / 7)} weeks ago`;
@@ -307,13 +386,15 @@ export default function EnhancedNotesScreen({ navigation, route }) {
   // ==================== FIREBASE & DATA FETCHING ====================
   const fetchFromAsyncStorage = async () => {
     try {
-      const savedOrganizedNotes = await AsyncStorage.getItem('organizedNotes');
+      const savedOrganizedNotes = await AsyncStorage.getItem("organizedNotes");
       if (savedOrganizedNotes) {
         const parsedNotes = JSON.parse(savedOrganizedNotes);
         setNotes(parsedNotes);
         setAiProvider(parsedNotes.aiProvider || "cached");
-        
-        const savedTranscription = await AsyncStorage.getItem('latestTranscription');
+
+        const savedTranscription = await AsyncStorage.getItem(
+          "latestTranscription",
+        );
         if (savedTranscription) {
           setRawTranscription(savedTranscription);
         }
@@ -330,7 +411,7 @@ export default function EnhancedNotesScreen({ navigation, route }) {
   const refineWithAI = async (transcription, recordingId = null) => {
     try {
       console.log("🤖 Processing with AI...");
-      
+
       if (!transcription || transcription.trim().length < 10) {
         throw new Error("Transcription too short to organize");
       }
@@ -369,14 +450,13 @@ export default function EnhancedNotesScreen({ navigation, route }) {
       organizedNotes.aiProvider = usedProvider;
       setNotes(organizedNotes);
       setAiProvider(usedProvider);
-      
+
       await saveOrganizedNotes(organizedNotes, recordingId);
       await haptics.notification("Success");
-
     } catch (error) {
       console.error("❌ AI refinement error:", error);
       setError(error.message);
-      
+
       const fallbackNotes = createFallbackNotes(transcription);
       fallbackNotes.aiProvider = "Fallback";
       setNotes(fallbackNotes);
@@ -389,51 +469,125 @@ export default function EnhancedNotesScreen({ navigation, route }) {
     const response = await fetch(GROQ_API_URL, {
       method: "POST",
       headers: {
-        "Authorization": `Bearer ${GROQ_API_KEY}`,
+        Authorization: `Bearer ${GROQ_API_KEY}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
         model: "llama-3.3-70b-versatile",
-        messages: [{
-          role: "system",
-          content: "You are an expert note-taking assistant. Transform lecture transcriptions into well-organized study notes with calculations, related topics, and comprehensive structure. Return ONLY valid JSON with no markdown formatting."
-        }, {
-          role: "user",
-          content: `Transform this lecture transcription into structured JSON study notes.
+        messages: [
+          {
+            role: "system",
+            content: `You are an expert note-taking assistant specializing in academic content across all fields (medical, engineering, law, finance, general). Transform lecture transcriptions into comprehensive, field-appropriate study notes. Return ONLY valid JSON with no markdown formatting.`,
+          },
+          {
+            role: "user",
+            content: `Transform this lecture transcription into structured JSON study notes. Analyze the content and include field-specific elements.
 
 Return ONLY valid JSON (no markdown, no code blocks) with this exact structure:
 {
   "title": "Specific descriptive lecture topic",
-  "summary": "2-3 sentence overview",
-  "keyPoints": ["point 1", "point 2", "point 3", "point 4", "point 5"],
+  "summary": "Brief 3-4 sentence overview",
+  "fullTranscript": "Complete cleaned transcription with proper formatting",
+  "organizedSummary": "Condensed 2-3 paragraph summary for quick review",
+  "keyPoints": ["Detailed point 1", "Detailed point 2", "Detailed point 3", ...],
   "sections": [
-    {"title": "Section name", "content": "Detailed explanation", "subtopics": ["subtopic1", "subtopic2"]}
+    {
+      "title": "Section name",
+      "content": "Detailed explanation of the section",
+      "subtopics": [
+        {
+          ["name": "Subtopic name",]
+          ["explanation": "Detailed explanation",]
+          ["examples": ["Example 1", "Example 2"]]
+        }
+      ]
+    }
   ],
-  "definitions": {"term": "definition"},
-  "questions": ["question 1", "question 2", "question 3"],
+  "definitions": {"Term": "Clear definition"},
   "calculations": [
-    {"problem": "problem statement", "solution": "answer", "steps": ["step 1", "step 2"]}
+    {
+      "problem": "Problem statement",
+      "solution": "Answer with units",
+      "steps": ["Step 1", "Step 2", "Step 3"],
+      "formula": "Formula used (if applicable)",
+      "variables": {"x": "Description of x", "y": "Description of y"}
+    }
   ],
-  "relatedTopics": ["topic 1", "topic 2", "topic 3"]
+  "chemicalEquations": [
+    {
+      "reaction": "2H₂ + O₂ → 2H₂O",
+      "reactionType": "Synthesis/Decomposition/etc",
+      "explanation": "What happens in this reaction",
+      "conditions": "Temperature, pressure, catalyst",
+      "applications": "Real-world uses"
+    }
+  ],
+  "formulas": [
+    {
+      "name": "Formula name",
+      "formula": "F = ma",
+      "variables": {"F": "Force (N)", "m": "mass (kg)", "a": "acceleration (m/s²)"},
+      "applications": "When and how to use this formula",
+      "derivation": "Brief explanation of where it comes from"
+    }
+  ],
+  "caseLaw": [
+    {
+      "caseName": "Case name and citation",
+      "facts": "Summary of relevant facts",
+      "issue": "Legal issue presented",
+      "holding": "Court's decision",
+      "reasoning": "Court's reasoning and analysis",
+      "significance": "Why this case matters / precedent set"
+    }
+  ],
+  "relatedTopics": ["Related topic 1", "Related topic 2", ...],
+  "studyTips": ["Study tip 1", "Study tip 2", ...],
+  "mnemonics": ["Memory aid 1", "Memory aid 2", ...],
+  "diagrams": [
+    {
+      "title": "Diagram title",
+      "description": "What should be included in this diagram",
+      "elements": ["Element 1", "Element 2", "Element 3"]
+    }
+  ],
+  "questions": ["question 1", "question 2", "question 3"]
 }
 
+IMPORTANT:
+- Include ALL applicable sections based on content type
+- For medical content: focus on chemicalEquations, definitions, mnemonics
+- For engineering/math: focus on formulas, calculations, derivations
+- For law: focus on caseLaw with full IRAC analysis
+- For finance: focus on formulas, calculations, applications
+- Make fullTranscript clean and readable (remove filler words, fix grammar)
+- Make organizedSummary concise but comprehensive (2-3 paragraphs)
+- Provide detailed explanations in sections and subtopics
+- Include practical examples where relevant
+
 Transcription:
-${transcription}`
-        }],
+${transcription}`,
+          },
+        ],
         temperature: 0.7,
-        max_tokens: 2048,
+        max_tokens: 4096,
       }),
     });
 
     if (!response.ok) {
       const errorData = await response.json();
-      throw new Error(errorData.error?.message || `Groq API Error: ${response.status}`);
+      throw new Error(
+        errorData.error?.message || `Groq API Error: ${response.status}`,
+      );
     }
 
     const data = await response.json();
     let responseText = data.choices[0].message.content.trim();
-    responseText = responseText.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
-    
+    responseText = responseText
+      .replace(/```json\s*/g, "")
+      .replace(/```\s*/g, "")
+      .trim();
+
     return JSON.parse(responseText);
   };
 
@@ -443,15 +597,15 @@ ${transcription}`
 Return ONLY valid JSON with this structure:
 {
   "title": "Specific descriptive lecture topic",
-  "summary": "2-3 sentence overview",
+  "summary": "full summary of the notes",
   "keyPoints": ["point 1", "point 2", "point 3", "point 4", "point 5"],
   "sections": [
-    {"title": "Section name", "content": "Detailed explanation", "subtopics": ["subtopic1", "subtopic2"]}
+    {"title": "Section name", "content": "Detailed explanation", "subtopics": ["subtopic1", "subtopic2"] for each subtopic have its notes as well}
   ],
   "definitions": {"term": "definition"},
   "questions": ["question 1", "question 2", "question 3"],
   "calculations": [
-    {"problem": "problem statement", "solution": "answer", "steps": ["step 1", "step 2"]}
+    {"problem": "problem statement", "solution": "answer", "steps": ["step 1", "step 2", "step 3"]}
   ],
   "relatedTopics": ["topic 1", "topic 2", "topic 3"]
 }
@@ -465,59 +619,76 @@ ${transcription}`;
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        contents: [{
-          parts: [{ text: prompt }]
-        }],
+        contents: [
+          {
+            parts: [{ text: prompt }],
+          },
+        ],
         generationConfig: {
           temperature: 0.7,
           maxOutputTokens: 2048,
-        }
+        },
       }),
     });
 
     if (!response.ok) {
       const errorData = await response.json();
-      throw new Error(errorData.error?.message || `Gemini API Error: ${response.status}`);
+      throw new Error(
+        errorData.error?.message || `Gemini API Error: ${response.status}`,
+      );
     }
 
     const data = await response.json();
     let responseText = data.candidates[0].content.parts[0].text;
-    responseText = responseText.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
-    
+    responseText = responseText
+      .replace(/```json\s*/g, "")
+      .replace(/```\s*/g, "")
+      .trim();
+
     return JSON.parse(responseText);
   };
 
   const createFallbackNotes = (transcription) => {
     const cleanedText = transcription
-      .replace(/\b(um|uh|like|you know)\b/gi, '')
-      .replace(/\s+/g, ' ')
+      .replace(/\b(um|uh|like|you know)\b/gi, "")
+      .replace(/\s+/g, " ")
       .trim();
-    
-    const sentences = cleanedText.split(/[.!?]+/).filter(s => s.trim().length > 15);
-    
+
+    const sentences = cleanedText
+      .split(/[.!?]+/)
+      .filter((s) => s.trim().length > 15);
+
     return {
       title: "Lecture Notes - " + new Date().toLocaleDateString(),
       summary: sentences.slice(0, 3).join(". ").substring(0, 250) + "...",
-      keyPoints: sentences.slice(0, 7).map(s => s.trim()).filter(s => s.length > 0),
-      sections: [{
-        title: "Main Content",
-        content: cleanedText.substring(0, 1000),
-        subtopics: []
-      }],
+      keyPoints: sentences
+        .slice(0, 7)
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0),
+      sections: [
+        {
+          title: "Main Content",
+          content: cleanedText.substring(0, 1000),
+          subtopics: [],
+        },
+      ],
       definitions: {},
       questions: [
         "What are the main topics covered in this lecture?",
         "What are the key takeaways?",
-        "How does this relate to previous material?"
+        "How does this relate to previous material?",
       ],
       calculations: [],
-      relatedTopics: []
+      relatedTopics: [],
     };
   };
 
   const saveOrganizedNotes = async (organizedNotes, recordingId) => {
     try {
-      await AsyncStorage.setItem('organizedNotes', JSON.stringify(organizedNotes));
+      await AsyncStorage.setItem(
+        "organizedNotes",
+        JSON.stringify(organizedNotes),
+      );
 
       if (recordingId) {
         try {
@@ -552,8 +723,8 @@ ${transcription}`;
       const diagramPrompt = `Based on the following lecture notes, create a Mermaid diagram (flowchart or conceptual diagram).
 
 Lecture Title: ${notes.title}
-Key Points: ${notes.keyPoints?.join(', ')}
-Sections: ${notes.sections?.map(s => s.title).join(', ')}
+Key Points: ${notes.keyPoints?.join(", ")}
+Sections: ${notes.sections?.map((s) => s.title).join(", ")}
 
 Create a Mermaid flowchart that visualizes the main concepts and their relationships.
 Return ONLY the Mermaid code without any markdown code blocks or explanations.
@@ -567,15 +738,17 @@ Start with "graph TD" or "graph LR" and use proper Mermaid syntax.`;
           const response = await fetch(GROQ_API_URL, {
             method: "POST",
             headers: {
-              "Authorization": `Bearer ${GROQ_API_KEY}`,
+              Authorization: `Bearer ${GROQ_API_KEY}`,
               "Content-Type": "application/json",
             },
             body: JSON.stringify({
               model: "llama-3.3-70b-versatile",
-              messages: [{
-                role: "user",
-                content: diagramPrompt
-              }],
+              messages: [
+                {
+                  role: "user",
+                  content: diagramPrompt,
+                },
+              ],
               temperature: 0.5,
               max_tokens: 1024,
             }),
@@ -584,7 +757,10 @@ Start with "graph TD" or "graph LR" and use proper Mermaid syntax.`;
           if (response.ok) {
             const data = await response.json();
             diagramCode = data.choices[0].message.content.trim();
-            diagramCode = diagramCode.replace(/```mermaid\s*/g, '').replace(/```\s*/g, '').trim();
+            diagramCode = diagramCode
+              .replace(/```mermaid\s*/g, "")
+              .replace(/```\s*/g, "")
+              .trim();
             console.log("✅ Diagram generated with Groq");
           }
         } catch (error) {
@@ -595,26 +771,34 @@ Start with "graph TD" or "graph LR" and use proper Mermaid syntax.`;
       // Fallback to Gemini
       if (!diagramCode && GEMINI_API_KEY && GEMINI_API_KEY.length > 10) {
         try {
-          const response = await fetch(`${GEMINI_API_URL}?key=${GEMINI_API_KEY}`, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
+          const response = await fetch(
+            `${GEMINI_API_URL}?key=${GEMINI_API_KEY}`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({
+                contents: [
+                  {
+                    parts: [{ text: diagramPrompt }],
+                  },
+                ],
+                generationConfig: {
+                  temperature: 0.5,
+                  maxOutputTokens: 1024,
+                },
+              }),
             },
-            body: JSON.stringify({
-              contents: [{
-                parts: [{ text: diagramPrompt }]
-              }],
-              generationConfig: {
-                temperature: 0.5,
-                maxOutputTokens: 1024,
-              }
-            }),
-          });
+          );
 
           if (response.ok) {
             const data = await response.json();
             diagramCode = data.candidates[0].content.parts[0].text.trim();
-            diagramCode = diagramCode.replace(/```mermaid\s*/g, '').replace(/```\s*/g, '').trim();
+            diagramCode = diagramCode
+              .replace(/```mermaid\s*/g, "")
+              .replace(/```\s*/g, "")
+              .trim();
             console.log("✅ Diagram generated with Gemini");
           }
         } catch (error) {
@@ -625,15 +809,14 @@ Start with "graph TD" or "graph LR" and use proper Mermaid syntax.`;
       // Fallback to simple diagram
       if (!diagramCode) {
         diagramCode = `graph TD
-    A[${notes.title}] --> B[${notes.sections?.[0]?.title || 'Section 1'}]
-    A --> C[${notes.sections?.[1]?.title || 'Section 2'}]
-    A --> D[${notes.sections?.[2]?.title || 'Section 3'}]`;
+    A[${notes.title}] --> B[${notes.sections?.[0]?.title || "Section 1"}]
+    A --> C[${notes.sections?.[1]?.title || "Section 2"}]
+    A --> D[${notes.sections?.[2]?.title || "Section 3"}]`;
       }
 
       setGeneratedDiagram(diagramCode);
       setShowDiagramModal(true);
       setGeneratingDiagram(false);
-
     } catch (error) {
       console.error("❌ Diagram generation error:", error);
       setGeneratingDiagram(false);
@@ -642,93 +825,201 @@ Start with "graph TD" or "graph LR" and use proper Mermaid syntax.`;
   };
 
   // ==================== ENHANCED FEATURES ====================
+  // I am enhancing flashcard generation to support all types and color coding
+  const cardColors = {
+    definition: ["#9B5DE5", "#7C3AED"],
+    formula: ["#8B5CF6", "#6D28D9"],
+    chemistry: ["#EC4899", "#DB2777"],
+    law: ["#EF4444", "#DC2626"],
+    question: ["#F59E0B", "#D97706"],
+    keypoint: ["#10B981", "#059669"],
+  };
   const generateFlashcards = () => {
     if (!notes) return;
-    
     const cards = [];
-    
+    // Definitions
     if (notes.definitions) {
       Object.entries(notes.definitions).forEach(([term, definition]) => {
         cards.push({
           front: `What is ${term}?`,
           back: definition,
-          type: "definition"
+          type: "definition",
         });
       });
     }
-
+    // Key Points
     if (notes.keyPoints) {
       notes.keyPoints.forEach((point, idx) => {
         cards.push({
           front: `Key Point #${idx + 1}`,
           back: point,
-          type: "keypoint"
+          type: "keypoint",
         });
       });
     }
-
+    // Questions
     if (notes.questions) {
       notes.questions.forEach((question, idx) => {
         cards.push({
           front: question,
           back: `Review section ${idx + 1} for the answer`,
-          type: "question"
+          type: "question",
         });
       });
     }
-
+    // Formulas
+    if (notes.formulas) {
+      notes.formulas.forEach((formula) => {
+        cards.push({
+          front: `Formula: ${formula.name}\n${formula.formula}`,
+          back: `Variables: ${Object.entries(formula.variables || {})
+            .map(([v, d]) => `${v}: ${d}`)
+            .join(", ")}\nApplications: ${formula.applications}`,
+          type: "formula",
+        });
+      });
+    }
+    // Chemistry
+    if (notes.chemicalEquations) {
+      notes.chemicalEquations.forEach((eq) => {
+        cards.push({
+          front: `Chemical Reaction: ${eq.reaction}`,
+          back: `Type: ${eq.reactionType}\nExplanation: ${eq.explanation}\nConditions: ${eq.conditions}`,
+          type: "chemistry",
+        });
+      });
+    }
+    // Case Law
+    if (notes.caseLaw) {
+      notes.caseLaw.forEach((caseItem) => {
+        cards.push({
+          front: `Case: ${caseItem.caseName}`,
+          back: `Facts: ${caseItem.facts}\nIssue: ${caseItem.issue}\nHolding: ${caseItem.holding}`,
+          type: "law",
+        });
+      });
+    }
     setFlashcards(cards);
   };
 
+  // I am enhancing search to cover all content types
   const handleSearch = (query) => {
     setSearchQuery(query);
-    
     if (!query.trim() || !notes) {
       setSearchResults([]);
       return;
     }
-
     const results = [];
     const lowerQuery = query.toLowerCase();
-
-    if (notes.title.toLowerCase().includes(lowerQuery)) {
+    if (notes.title?.toLowerCase().includes(lowerQuery)) {
       results.push({ type: "title", content: notes.title, match: "Title" });
     }
-
     if (notes.sections) {
       notes.sections.forEach((section, idx) => {
-        if (section.title.toLowerCase().includes(lowerQuery)) {
-          results.push({ type: "section", content: section.title, match: "Section", index: idx });
+        if (section.title?.toLowerCase().includes(lowerQuery)) {
+          results.push({
+            type: "section",
+            content: section.title,
+            match: "Section",
+            index: idx,
+          });
         }
-        if (section.content.toLowerCase().includes(lowerQuery)) {
-          results.push({ type: "section", content: section.title, match: "Content", index: idx });
+        if (section.content?.toLowerCase().includes(lowerQuery)) {
+          results.push({
+            type: "section",
+            content: section.title,
+            match: "Content",
+            index: idx,
+          });
         }
         if (section.subtopics) {
-          section.subtopics.forEach(subtopic => {
-            if (subtopic.toLowerCase().includes(lowerQuery)) {
-              results.push({ type: "subtopic", content: subtopic, match: "Subtopic", sectionIndex: idx });
+          section.subtopics.forEach((subtopic) => {
+            if (
+              typeof subtopic === "string" &&
+              subtopic.toLowerCase().includes(lowerQuery)
+            ) {
+              results.push({
+                type: "subtopic",
+                content: subtopic,
+                match: "Subtopic",
+                sectionIndex: idx,
+              });
+            } else if (
+              typeof subtopic === "object" &&
+              subtopic.name?.toLowerCase().includes(lowerQuery)
+            ) {
+              results.push({
+                type: "subtopic",
+                content: subtopic.name,
+                match: "Subtopic",
+                sectionIndex: idx,
+              });
             }
           });
         }
       });
     }
-
     if (notes.definitions) {
       Object.entries(notes.definitions).forEach(([term, def]) => {
-        if (term.toLowerCase().includes(lowerQuery) || def.toLowerCase().includes(lowerQuery)) {
-          results.push({ type: "definition", content: term, match: "Definition" });
+        if (
+          term.toLowerCase().includes(lowerQuery) ||
+          def.toLowerCase().includes(lowerQuery)
+        ) {
+          results.push({
+            type: "definition",
+            content: term,
+            match: "Definition",
+          });
         }
       });
     }
-
+    if (notes.formulas) {
+      notes.formulas.forEach((formula, idx) => {
+        if (
+          formula.name?.toLowerCase().includes(lowerQuery) ||
+          formula.formula?.toLowerCase().includes(lowerQuery)
+        ) {
+          results.push({
+            type: "formula",
+            content: formula.name,
+            match: "Formula",
+            index: idx,
+          });
+        }
+      });
+    }
+    if (notes.chemicalEquations) {
+      notes.chemicalEquations.forEach((eq, idx) => {
+        if (eq.reaction?.toLowerCase().includes(lowerQuery)) {
+          results.push({
+            type: "chemistry",
+            content: eq.reaction,
+            match: "Chemical Equation",
+            index: idx,
+          });
+        }
+      });
+    }
+    if (notes.caseLaw) {
+      notes.caseLaw.forEach((caseItem, idx) => {
+        if (caseItem.caseName?.toLowerCase().includes(lowerQuery)) {
+          results.push({
+            type: "caseLaw",
+            content: caseItem.caseName,
+            match: "Case Law",
+            index: idx,
+          });
+        }
+      });
+    }
     setSearchResults(results);
   };
 
   const toggleSection = async (index) => {
     await haptics.impact("Light");
-    setExpandedSections(prev => ({
+    setExpandedSections((prev) => ({
       ...prev,
-      [index]: !prev[index]
+      [index]: !prev[index],
     }));
   };
 
@@ -739,7 +1030,9 @@ Start with "graph TD" or "graph LR" and use proper Mermaid syntax.`;
 
   const previousFlashcard = () => {
     setShowFlashcardAnswer(false);
-    setCurrentFlashcard((prev) => (prev - 1 + flashcards.length) % flashcards.length);
+    setCurrentFlashcard(
+      (prev) => (prev - 1 + flashcards.length) % flashcards.length,
+    );
   };
 
   const saveEditedNotes = async () => {
@@ -793,54 +1086,93 @@ Start with "graph TD" or "graph LR" and use proper Mermaid syntax.`;
     }
   };
 
+  // I am enhancing export to include all field-specific content
   const formatNotesAsText = (notes) => {
     if (!notes) return "";
-    
-    let text = `📚 ${notes.title}\n${'='.repeat(notes.title.length + 3)}\n\n`;
+    let text = `📚 ${notes.title}\n${"=".repeat(notes.title.length + 3)}\n\n`;
     text += `📝 Summary:\n${notes.summary}\n\n`;
-    
     if (notes.keyPoints) {
       text += `⭐ Key Points:\n`;
-      notes.keyPoints.forEach((p, i) => text += `${i + 1}. ${p}\n`);
-      text += '\n';
+      notes.keyPoints.forEach((p, i) => (text += `${i + 1}. ${p}\n`));
+      text += "\n";
     }
-    
     if (notes.sections) {
       notes.sections.forEach((section) => {
-        text += `\n📂 ${section.title}\n${'-'.repeat(section.title.length + 3)}\n${section.content}\n`;
+        text += `\n📂 ${section.title}\n${"-".repeat(section.title.length + 3)}\n${section.content}\n`;
         if (section.subtopics && section.subtopics.length > 0) {
           text += `\nSubtopics:\n`;
-          section.subtopics.forEach(st => text += `  • ${st}\n`);
+          section.subtopics.forEach((st) => {
+            if (typeof st === "string") text += `  • ${st}\n`;
+            else if (typeof st === "object" && st.name)
+              text += `  • ${st.name}: ${st.explanation || ""}\n`;
+          });
         }
-        text += '\n';
+        text += "\n";
       });
     }
-    
     if (notes.definitions && Object.keys(notes.definitions).length > 0) {
-      text += `\n📖 Key Definitions:\n${'-'.repeat(18)}\n`;
+      text += `\n📖 Key Definitions:\n${"-".repeat(18)}\n`;
       Object.entries(notes.definitions).forEach(([term, def]) => {
         text += `\n${term}:\n  ${def}\n`;
       });
-      text += '\n';
+      text += "\n";
     }
-    
+    if (notes.formulas && notes.formulas.length > 0) {
+      text += `\n📐 Formulas:\n`;
+      notes.formulas.forEach((f) => {
+        text += `\n${f.name}: ${f.formula}\nVariables: ${Object.entries(
+          f.variables || {},
+        )
+          .map(([v, d]) => `${v}: ${d}`)
+          .join(
+            ", ",
+          )}\nApplications: ${f.applications}\nDerivation: ${f.derivation}\n`;
+      });
+    }
+    if (notes.chemicalEquations && notes.chemicalEquations.length > 0) {
+      text += `\n⚗️ Chemical Equations:\n`;
+      notes.chemicalEquations.forEach((eq) => {
+        text += `\n${eq.reaction}\nType: ${eq.reactionType}\nExplanation: ${eq.explanation}\nConditions: ${eq.conditions}\nApplications: ${eq.applications}\n`;
+      });
+    }
+    if (notes.calculations && notes.calculations.length > 0) {
+      text += `\n🧮 Calculations:\n`;
+      notes.calculations.forEach((calc) => {
+        text += `\n${calc.problem}\nFormula: ${calc.formula}\nSolution: ${calc.solution}\nSteps:\n${calc.steps?.map((s, i) => `  ${i + 1}. ${s}`).join("\n")}\n`;
+      });
+    }
+    if (notes.caseLaw && notes.caseLaw.length > 0) {
+      text += `\n⚖️ Case Law:\n`;
+      notes.caseLaw.forEach((c) => {
+        text += `\n${c.caseName}\nFacts: ${c.facts}\nIssue: ${c.issue}\nHolding: ${c.holding}\nReasoning: ${c.reasoning}\nSignificance: ${c.significance}\n`;
+      });
+    }
     if (notes.questions && notes.questions.length > 0) {
-      text += `\n❓ Review Questions:\n${'-'.repeat(20)}\n`;
-      notes.questions.forEach((q, i) => text += `${i + 1}. ${q}\n`);
+      text += `\n❓ Review Questions:\n${"-".repeat(20)}\n`;
+      notes.questions.forEach((q, i) => (text += `${i + 1}. ${q}\n`));
     }
-    
     text += `\n\n---\nGenerated by Notetedd • ${new Date().toLocaleDateString()}\n`;
-    text += `AI: ${aiProvider} • Storage: ${dataSource === 'firestore' ? 'Cloud' : 'Local'}\n`;
-    
+    text += `AI: ${aiProvider} • Field: ${academicField} • Storage: ${dataSource === "firestore" ? "Cloud" : "Local"}\n`;
     return text;
   };
 
   const detectCalculations = () => {
     if (!notes) return false;
-    const mathKeywords = ["derivative", "integral", "limit", "equation", "formula", "calculate"];
-    return notes.sections?.some(section => 
-      mathKeywords.some(keyword => section.content.toLowerCase().includes(keyword))
-    ) || false;
+    const mathKeywords = [
+      "derivative",
+      "integral",
+      "limit",
+      "equation",
+      "formula",
+      "calculate",
+    ];
+    return (
+      notes.sections?.some((section) =>
+        mathKeywords.some((keyword) =>
+          section.content.toLowerCase().includes(keyword),
+        ),
+      ) || false
+    );
   };
 
   // ==================== RENDER LECTURE LIST ====================
@@ -849,14 +1181,18 @@ Start with "graph TD" or "graph LR" and use proper Mermaid syntax.`;
       <Text style={[styles.lectureListTitle, isDark && styles.textDark]}>
         Select a Lecture
       </Text>
-      <Text style={[styles.lectureListSubtitle, isDark && styles.textSecondaryDark]}>
+      <Text
+        style={[styles.lectureListSubtitle, isDark && styles.textSecondaryDark]}
+      >
         Choose from your recorded lectures
       </Text>
 
       {loadingLectures ? (
         <View style={styles.lectureListLoading}>
           <MaterialIcons name="hourglass-empty" size={48} color="#9B5DE5" />
-          <Text style={[styles.loadingText, isDark && styles.textSecondaryDark]}>
+          <Text
+            style={[styles.loadingText, isDark && styles.textSecondaryDark]}
+          >
             Loading your lectures...
           </Text>
         </View>
@@ -869,7 +1205,7 @@ Start with "graph TD" or "graph LR" and use proper Mermaid syntax.`;
           <Text style={[styles.emptyText, isDark && styles.textSecondaryDark]}>
             Record your first lecture to get started
           </Text>
-          <TouchableOpacity 
+          <TouchableOpacity
             style={styles.recordButton}
             onPress={() => navigation.navigate("RecordScreen")}
           >
@@ -888,33 +1224,69 @@ Start with "graph TD" or "graph LR" and use proper Mermaid syntax.`;
           keyExtractor={(item) => item.id}
           renderItem={({ item }) => (
             <TouchableOpacity
-              style={[styles.lectureListItem, isDark && styles.lectureListItemDark]}
+              style={[
+                styles.lectureListItem,
+                isDark && styles.lectureListItemDark,
+              ]}
               onPress={() => handleLectureSelection(item)}
               activeOpacity={0.7}
             >
-              <View style={[styles.lectureListIcon, { backgroundColor: item.color + "20" }]}>
-                <MaterialIcons name="description" size={28} color={item.color} />
+              <View
+                style={[
+                  styles.lectureListIcon,
+                  { backgroundColor: item.color + "20" },
+                ]}
+              >
+                <MaterialIcons
+                  name="description"
+                  size={28}
+                  color={item.color}
+                />
               </View>
               <View style={styles.lectureListContent}>
-                <Text style={[styles.lectureListItemTitle, isDark && styles.textDark]}>
+                <Text
+                  style={[
+                    styles.lectureListItemTitle,
+                    isDark && styles.textDark,
+                  ]}
+                >
                   {item.title}
                 </Text>
-                <Text style={[styles.lectureListItemPreview, isDark && styles.textSecondaryDark]}>
+                <Text
+                  style={[
+                    styles.lectureListItemPreview,
+                    isDark && styles.textSecondaryDark,
+                  ]}
+                >
                   {item.preview}...
                 </Text>
                 <View style={styles.lectureListMeta}>
                   <View style={styles.lectureMetaItem}>
                     <MaterialIcons name="schedule" size={14} color="#6B7280" />
-                    <Text style={styles.lectureMetaText}>{item.duration} mins</Text>
+                    <Text style={styles.lectureMetaText}>
+                      {item.duration} mins
+                    </Text>
                   </View>
                   <View style={styles.lectureMetaItem}>
-                    <MaterialIcons name="calendar-today" size={14} color="#6B7280" />
+                    <MaterialIcons
+                      name="calendar-today"
+                      size={14}
+                      color="#6B7280"
+                    />
                     <Text style={styles.lectureMetaText}>{item.timeAgo}</Text>
                   </View>
                   {item.hasNotes && (
                     <View style={[styles.lectureMetaItem, styles.hasNotesTag]}>
-                      <MaterialIcons name="check-circle" size={14} color="#10B981" />
-                      <Text style={[styles.lectureMetaText, { color: "#10B981" }]}>Organized</Text>
+                      <MaterialIcons
+                        name="check-circle"
+                        size={14}
+                        color="#10B981"
+                      />
+                      <Text
+                        style={[styles.lectureMetaText, { color: "#10B981" }]}
+                      >
+                        Organized
+                      </Text>
                     </View>
                   )}
                 </View>
@@ -930,50 +1302,103 @@ Start with "graph TD" or "graph LR" and use proper Mermaid syntax.`;
   );
 
   // ==================== RENDER TABS ====================
+  // I am implementing the multi-view mode selector and field badge
   const renderNotesTab = () => (
-    <Animated.View style={{ opacity: fadeAnim, transform: [{ translateY: slideAnim }] }}>
+    <Animated.View
+      style={{ opacity: fadeAnim, transform: [{ translateY: slideAnim }] }}
+    >
+      {/* Multi-View Mode Selector */}
+      <View style={styles.viewModeContainer}>
+        {[
+          { mode: "full", icon: "article", label: "Full" },
+          { mode: "summary", icon: "summarize", label: "Summary" },
+          { mode: "organized", icon: "account-tree", label: "Organized" },
+        ].map((opt) => (
+          <TouchableOpacity
+            key={opt.mode}
+            onPress={() => setViewMode(opt.mode)}
+            style={[
+              styles.viewModeButton,
+              viewMode === opt.mode && styles.activeViewModeButton,
+            ]}
+          >
+            <MaterialIcons
+              name={opt.icon}
+              size={20}
+              color={viewMode === opt.mode ? "#9B5DE5" : "#6B7280"}
+            />
+            <Text
+              style={[
+                styles.viewModeText,
+                viewMode === opt.mode && styles.activeViewModeText,
+              ]}
+            >
+              {opt.label}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+      {/* Academic Field Badge */}
+      {academicField !== "general" && (
+        <View style={styles.fieldBadgeContainer}>
+          <MaterialIcons
+            name={getFieldIcon(academicField)}
+            size={18}
+            color="#fff"
+            style={{ marginRight: 6 }}
+          />
+          <Text style={styles.fieldBadgeText}>
+            {academicField.charAt(0).toUpperCase() + academicField.slice(1)}{" "}
+            Content Detected
+          </Text>
+        </View>
+      )}
       {/* Action Buttons */}
       <View style={styles.actionsContainer}>
-        <TouchableOpacity 
+        <TouchableOpacity
           style={[styles.actionButton, isDark && styles.actionButtonDark]}
           onPress={handleCopyNotes}
         >
           <MaterialIcons name="content-copy" size={20} color="#9B5DE5" />
-          <Text style={[styles.actionButtonText, isDark && styles.textDark]}>Copy</Text>
+          <Text style={[styles.actionButtonText, isDark && styles.textDark]}>
+            Copy
+          </Text>
         </TouchableOpacity>
 
-        <TouchableOpacity 
+        <TouchableOpacity
           style={[styles.actionButton, isDark && styles.actionButtonDark]}
           onPress={handleShareNotes}
         >
           <MaterialIcons name="share" size={20} color="#10B981" />
-          <Text style={[styles.actionButtonText, isDark && styles.textDark]}>Share</Text>
+          <Text style={[styles.actionButtonText, isDark && styles.textDark]}>
+            Share
+          </Text>
         </TouchableOpacity>
 
-        <TouchableOpacity 
+        <TouchableOpacity
           style={[styles.actionButton, isDark && styles.actionButtonDark]}
           onPress={generateDiagram}
           disabled={generatingDiagram}
         >
-          <MaterialIcons 
-            name="account-tree" 
-            size={20} 
-            color={generatingDiagram ? "#9CA3AF" : "#00B4D8"} 
+          <MaterialIcons
+            name="account-tree"
+            size={20}
+            color={generatingDiagram ? "#9CA3AF" : "#00B4D8"}
           />
           <Text style={[styles.actionButtonText, isDark && styles.textDark]}>
             {generatingDiagram ? "..." : "Diagram"}
           </Text>
         </TouchableOpacity>
 
-        <TouchableOpacity 
+        <TouchableOpacity
           style={[styles.actionButton, isDark && styles.actionButtonDark]}
           onPress={handleRegenerate}
           disabled={isRegenerating || !rawTranscription}
         >
-          <MaterialIcons 
-            name="refresh" 
-            size={20} 
-            color={isRegenerating || !rawTranscription ? "#9CA3AF" : "#EF4444"} 
+          <MaterialIcons
+            name="refresh"
+            size={20}
+            color={isRegenerating || !rawTranscription ? "#9CA3AF" : "#EF4444"}
           />
           <Text style={[styles.actionButtonText, isDark && styles.textDark]}>
             {isRegenerating ? "..." : "Regen"}
@@ -981,60 +1406,213 @@ Start with "graph TD" or "graph LR" and use proper Mermaid syntax.`;
         </TouchableOpacity>
       </View>
 
-      {/* Title & Summary */}
+      {/* View Mode Content */}
       <View style={[styles.titleCard, isDark && styles.titleCardDark]}>
-        <Text style={[styles.noteTitle, isDark && styles.textDark]}>{notes.title}</Text>
-        <View style={styles.summaryContainer}>
-          <MaterialIcons name="summarize" size={20} color="#9B5DE5" />
-          <Text style={[styles.summary, isDark && styles.textSecondaryDark]}>{notes.summary}</Text>
-        </View>
+        <Text style={[styles.noteTitle, isDark && styles.textDark]}>
+          {notes.title}
+        </Text>
+        {viewMode === "summary" && (
+          <View style={styles.summaryContainer}>
+            <MaterialIcons name="summarize" size={20} color="#9B5DE5" />
+            <Text style={[styles.summary, isDark && styles.textSecondaryDark]}>
+              {notes.organizedSummary || notes.summary}
+            </Text>
+          </View>
+        )}
+        {viewMode === "full" && (
+          <View style={styles.summaryContainer}>
+            <MaterialIcons name="article" size={20} color="#9B5DE5" />
+            <Text style={[styles.summary, isDark && styles.textSecondaryDark]}>
+              {notes.fullTranscript || notes.summary}
+            </Text>
+          </View>
+        )}
+        {viewMode === "organized" && (
+          <View style={styles.summaryContainer}>
+            <MaterialIcons name="account-tree" size={20} color="#9B5DE5" />
+            <Text style={[styles.summary, isDark && styles.textSecondaryDark]}>
+              {notes.organizedSummary || notes.summary}
+            </Text>
+          </View>
+        )}
       </View>
 
       {/* Related Topics */}
-      {showRelatedTopics && notes.relatedTopics && notes.relatedTopics.length > 0 && (
-        <View style={[styles.section, isDark && styles.sectionDark]}>
-          <View style={styles.sectionHeader}>
-            <MaterialIcons name="link" size={24} color="#10B981" />
-            <Text style={[styles.sectionTitle, isDark && styles.textDark]}>Related Topics</Text>
+      {showRelatedTopics &&
+        notes.relatedTopics &&
+        notes.relatedTopics.length > 0 && (
+          <View style={[styles.section, isDark && styles.sectionDark]}>
+            <View style={styles.sectionHeader}>
+              <MaterialIcons name="link" size={24} color="#10B981" />
+              <Text style={[styles.sectionTitle, isDark && styles.textDark]}>
+                Related Topics
+              </Text>
+            </View>
+            <View style={styles.relatedTopicsContainer}>
+              {notes.relatedTopics.map((topic, idx) => (
+                <TouchableOpacity key={idx} style={styles.relatedTopicChip}>
+                  <MaterialIcons
+                    name="arrow-forward"
+                    size={14}
+                    color="#10B981"
+                  />
+                  <Text style={styles.relatedTopicText}>{topic}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
           </View>
-          <View style={styles.relatedTopicsContainer}>
-            {notes.relatedTopics.map((topic, idx) => (
-              <TouchableOpacity key={idx} style={styles.relatedTopicChip}>
-                <MaterialIcons name="arrow-forward" size={14} color="#10B981" />
-                <Text style={styles.relatedTopicText}>{topic}</Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-        </View>
-      )}
+        )}
 
-      {/* Calculations Section */}
-      {showCalculations && detectCalculations() && notes.calculations && notes.calculations.length > 0 && (
+      {/* Calculations Section with toggle */}
+      {notes.calculations && notes.calculations.length > 0 && (
         <View style={[styles.section, isDark && styles.sectionDark]}>
           <View style={styles.sectionHeader}>
             <MaterialIcons name="calculate" size={24} color="#F59E0B" />
-            <Text style={[styles.sectionTitle, isDark && styles.textDark]}>Calculations</Text>
+            <Text style={[styles.sectionTitle, isDark && styles.textDark]}>
+              Calculations
+            </Text>
+            <TouchableOpacity
+              onPress={() => setShowCalculations(!showCalculations)}
+            >
+              <MaterialIcons
+                name={showCalculations ? "visibility" : "visibility-off"}
+                size={20}
+                color="#F59E0B"
+              />
+            </TouchableOpacity>
           </View>
-          {notes.calculations.map((calc, idx) => (
-            <View key={idx} style={styles.calculationItem}>
-              <Text style={[styles.calculationProblem, isDark && styles.textDark]}>
-                {calc.problem}
-              </Text>
-              <View style={styles.calculationSolution}>
-                <MaterialIcons name="arrow-forward" size={16} color="#10B981" />
-                <Text style={[styles.calculationAnswer, isDark && styles.textDark]}>
-                  {calc.solution}
+          {showCalculations &&
+            notes.calculations.map((calc, idx) => (
+              <View key={idx} style={styles.calculationItem}>
+                <Text
+                  style={[styles.calculationProblem, isDark && styles.textDark]}
+                >
+                  {calc.problem}
                 </Text>
+                <Text>Formula: {calc.formula}</Text>
+                <Text>Solution: {calc.solution}</Text>
+                <View>
+                  {calc.steps?.map((step, i) => (
+                    <Text key={i}>
+                      {i + 1}. {step}
+                    </Text>
+                  ))}
+                </View>
               </View>
-              <View style={styles.calculationSteps}>
-                {calc.steps.map((step, stepIdx) => (
-                  <Text key={stepIdx} style={[styles.calculationStep, isDark && styles.textSecondaryDark]}>
-                    {stepIdx + 1}. {step}
+            ))}
+        </View>
+      )}
+
+      {/* Formulas Section with toggle */}
+      {notes.formulas && notes.formulas.length > 0 && (
+        <View style={[styles.section, isDark && styles.sectionDark]}>
+          <View style={styles.sectionHeader}>
+            <MaterialIcons name="functions" size={24} color="#8B5CF6" />
+            <Text style={[styles.sectionTitle, isDark && styles.textDark]}>
+              Formulas
+            </Text>
+            <TouchableOpacity onPress={() => setShowFormulas(!showFormulas)}>
+              <MaterialIcons
+                name={showFormulas ? "visibility" : "visibility-off"}
+                size={20}
+                color="#8B5CF6"
+              />
+            </TouchableOpacity>
+          </View>
+          {showFormulas &&
+            notes.formulas.map((formula, idx) => (
+              <View key={idx} style={styles.formulaItem}>
+                <Text style={styles.formulaName}>{formula.name}</Text>
+                <View style={styles.formulaBox}>
+                  <Text style={styles.formulaExpression}>
+                    {formula.formula}
                   </Text>
-                ))}
+                </View>
+                <View style={styles.variablesContainer}>
+                  {Object.entries(formula.variables || {}).map(([v, desc]) => (
+                    <Text key={v}>
+                      <Text style={styles.variableName}>{v}</Text>: {desc}
+                    </Text>
+                  ))}
+                </View>
+                <Text>Applications: {formula.applications}</Text>
+                <Text>Derivation: {formula.derivation}</Text>
               </View>
-            </View>
-          ))}
+            ))}
+        </View>
+      )}
+
+      {/* Chemistry Section with toggle */}
+      {notes.chemicalEquations && notes.chemicalEquations.length > 0 && (
+        <View style={[styles.section, isDark && styles.sectionDark]}>
+          <View style={styles.sectionHeader}>
+            <MaterialIcons name="science" size={24} color="#EC4899" />
+            <Text style={[styles.sectionTitle, isDark && styles.textDark]}>
+              Chemical Equations
+            </Text>
+            <TouchableOpacity onPress={() => setShowChemistry(!showChemistry)}>
+              <MaterialIcons
+                name={showChemistry ? "visibility" : "visibility-off"}
+                size={20}
+                color="#EC4899"
+              />
+            </TouchableOpacity>
+          </View>
+          {showChemistry &&
+            notes.chemicalEquations.map((eq, idx) => (
+              <View key={idx} style={styles.chemistryItem}>
+                <Text style={styles.chemistryReaction}>{eq.reaction}</Text>
+                <Text>Type: {eq.reactionType}</Text>
+                <Text>{eq.explanation}</Text>
+                <Text>Conditions: {eq.conditions}</Text>
+                <Text>Applications: {eq.applications}</Text>
+              </View>
+            ))}
+        </View>
+      )}
+
+      {/* Case Law Section with toggle */}
+      {notes.caseLaw && notes.caseLaw.length > 0 && (
+        <View style={[styles.section, isDark && styles.sectionDark]}>
+          <View style={styles.sectionHeader}>
+            <MaterialIcons name="gavel" size={24} color="#EF4444" />
+            <Text style={[styles.sectionTitle, isDark && styles.textDark]}>
+              Case Law
+            </Text>
+            <TouchableOpacity onPress={() => setShowCaseLaw(!showCaseLaw)}>
+              <MaterialIcons
+                name={showCaseLaw ? "visibility" : "visibility-off"}
+                size={20}
+                color="#EF4444"
+              />
+            </TouchableOpacity>
+          </View>
+          {showCaseLaw &&
+            notes.caseLaw.map((caseItem, idx) => (
+              <View key={idx} style={styles.caseLawItem}>
+                <Text style={styles.caseName}>{caseItem.caseName}</Text>
+                <View style={styles.caseSection}>
+                  <Text style={styles.caseLabel}>Facts:</Text>
+                  <Text>{caseItem.facts}</Text>
+                </View>
+                <View style={styles.caseSection}>
+                  <Text style={styles.caseLabel}>Issue:</Text>
+                  <Text>{caseItem.issue}</Text>
+                </View>
+                <View style={styles.caseSection}>
+                  <Text style={styles.caseLabel}>Holding:</Text>
+                  <Text>{caseItem.holding}</Text>
+                </View>
+                <View style={styles.caseSection}>
+                  <Text style={styles.caseLabel}>Reasoning:</Text>
+                  <Text>{caseItem.reasoning}</Text>
+                </View>
+                <View style={styles.caseSignificance}>
+                  <MaterialIcons name="star" size={16} color="#F59E0B" />
+                  <Text>{caseItem.significance}</Text>
+                </View>
+              </View>
+            ))}
         </View>
       )}
 
@@ -1043,74 +1621,128 @@ Start with "graph TD" or "graph LR" and use proper Mermaid syntax.`;
         <View style={[styles.section, isDark && styles.sectionDark]}>
           <View style={styles.sectionHeader}>
             <MaterialIcons name="star" size={24} color="#F59E0B" />
-            <Text style={[styles.sectionTitle, isDark && styles.textDark]}>Key Points</Text>
+            <Text style={[styles.sectionTitle, isDark && styles.textDark]}>
+              Key Points
+            </Text>
           </View>
           {notes.keyPoints.map((point, index) => (
             <View key={index} style={styles.keyPointItem}>
               <View style={styles.keyPointBullet}>
                 <Text style={styles.keyPointNumber}>{index + 1}</Text>
               </View>
-              <Text style={[styles.keyPointText, isDark && styles.textDark]}>{point}</Text>
+              <Text style={[styles.keyPointText, isDark && styles.textDark]}>
+                {point}
+              </Text>
             </View>
           ))}
         </View>
       )}
 
       {/* Sections */}
-      {notes.sections && notes.sections.map((section, index) => (
-        <TouchableOpacity
-          key={index}
-          style={[styles.section, isDark && styles.sectionDark]}
-          onPress={() => toggleSection(index)}
-          activeOpacity={0.7}
-        >
-          <View style={styles.sectionHeader}>
-            <MaterialIcons name="folder" size={24} color="#9B5DE5" />
-            <Text style={[styles.sectionTitle, isDark && styles.textDark]}>{section.title}</Text>
-            <MaterialIcons 
-              name={expandedSections[index] ? "expand-less" : "expand-more"} 
-              size={24} 
-              color={isDark ? "#9CA3AF" : "#6B7280"} 
-            />
-          </View>
-
-          {expandedSections[index] && (
-            <>
-              <Text style={[styles.sectionContent, isDark && styles.textSecondaryDark]}>
-                {section.content}
+      {notes.sections &&
+        notes.sections.map((section, index) => (
+          <TouchableOpacity
+            key={index}
+            style={[styles.section, isDark && styles.sectionDark]}
+            onPress={() => toggleSection(index)}
+            activeOpacity={0.7}
+          >
+            <View style={styles.sectionHeader}>
+              <MaterialIcons name="folder" size={24} color="#9B5DE5" />
+              <Text style={[styles.sectionTitle, isDark && styles.textDark]}>
+                {section.title}
               </Text>
-              {section.subtopics && section.subtopics.length > 0 && (
-                <View style={styles.subtopicsContainer}>
-                  {section.subtopics.map((subtopic, subIndex) => (
-                    <View key={subIndex} style={styles.subtopicItem}>
-                      <MaterialIcons name="chevron-right" size={16} color="#9B5DE5" />
-                      <Text style={[styles.subtopicText, isDark && styles.textSecondaryDark]}>
-                        {subtopic}
-                      </Text>
-                    </View>
-                  ))}
-                </View>
-              )}
-            </>
-          )}
-        </TouchableOpacity>
-      ))}
+              <MaterialIcons
+                name={expandedSections[index] ? "expand-less" : "expand-more"}
+                size={24}
+                color={isDark ? "#9CA3AF" : "#6B7280"}
+              />
+            </View>
+
+            {expandedSections[index] && (
+              <>
+                <Text
+                  style={[
+                    styles.sectionContent,
+                    isDark && styles.textSecondaryDark,
+                  ]}
+                >
+                  {section.content}
+                </Text>
+                {section.subtopics && section.subtopics.length > 0 && (
+                  <View style={styles.subtopicsContainer}>
+                    {section.subtopics.map((subtopic, subIndex) => (
+                      <View key={subIndex} style={styles.subtopicItem}>
+                        <MaterialIcons
+                          name="chevron-right"
+                          size={16}
+                          color="#9B5DE5"
+                        />
+                        <Text
+                          style={[
+                            styles.subtopicText,
+                            isDark && styles.textSecondaryDark,
+                          ]}
+                        >
+                          {/* I am fixing: If subtopic is an object, render its fields nicely. */}
+                          {typeof subtopic === "string" && subtopic}
+                          {typeof subtopic === "object" &&
+                            subtopic !== null && (
+                              <>
+                                <Text style={{ fontWeight: "bold" }}>
+                                  {subtopic.name}
+                                </Text>
+                                {subtopic.explanation
+                                  ? `: ${subtopic.explanation}`
+                                  : ""}
+                                {subtopic.examples &&
+                                  Array.isArray(subtopic.examples) &&
+                                  subtopic.examples.length > 0 && (
+                                    <Text style={{ color: "#6B7280" }}>
+                                      {"\nExamples: " +
+                                        subtopic.examples.join(", ")}
+                                    </Text>
+                                  )}
+                              </>
+                            )}
+                        </Text>
+                      </View>
+                    ))}
+                  </View>
+                )}
+              </>
+            )}
+          </TouchableOpacity>
+        ))}
 
       {/* Definitions */}
       {notes.definitions && Object.keys(notes.definitions).length > 0 && (
         <View style={[styles.section, isDark && styles.sectionDark]}>
           <View style={styles.sectionHeader}>
             <MaterialIcons name="menu-book" size={24} color="#10B981" />
-            <Text style={[styles.sectionTitle, isDark && styles.textDark]}>Key Definitions</Text>
+            <Text style={[styles.sectionTitle, isDark && styles.textDark]}>
+              Key Definitions
+            </Text>
           </View>
-          {Object.entries(notes.definitions).map(([term, definition], index) => (
-            <View key={index} style={styles.definitionItem}>
-              <Text style={[styles.definitionTerm, isDark && styles.textDark]}>{term}</Text>
-              <Text style={[styles.definitionText, isDark && styles.textSecondaryDark]}>
-                {definition}
-              </Text>
-            </View>
-          ))}
+          {Object.entries(notes.definitions).map(
+            ([term, definition], index) => (
+              <View key={index} style={styles.definitionItem}>
+                <Text
+                  style={[styles.definitionTerm, isDark && styles.textDark]}
+                >
+                  {term}
+                </Text>
+                <Text
+                  style={[
+                    styles.definitionText,
+                    isDark && styles.textSecondaryDark,
+                  ]}
+                >
+                  {definition}
+                </Text>
+              </View>
+            ),
+          )}
         </View>
       )}
 
@@ -1119,14 +1751,18 @@ Start with "graph TD" or "graph LR" and use proper Mermaid syntax.`;
         <View style={[styles.section, isDark && styles.sectionDark]}>
           <View style={styles.sectionHeader}>
             <MaterialIcons name="quiz" size={24} color="#EF4444" />
-            <Text style={[styles.sectionTitle, isDark && styles.textDark]}>Review Questions</Text>
+            <Text style={[styles.sectionTitle, isDark && styles.textDark]}>
+              Review Questions
+            </Text>
           </View>
           {notes.questions.map((question, index) => (
             <View key={index} style={styles.questionItem}>
               <View style={styles.questionNumber}>
                 <Text style={styles.questionNumberText}>Q{index + 1}</Text>
               </View>
-              <Text style={[styles.questionText, isDark && styles.textDark]}>{question}</Text>
+              <Text style={[styles.questionText, isDark && styles.textDark]}>
+                {question}
+              </Text>
             </View>
           ))}
         </View>
@@ -1134,6 +1770,7 @@ Start with "graph TD" or "graph LR" and use proper Mermaid syntax.`;
     </Animated.View>
   );
 
+  // I am enhancing the flashcards tab to use type-specific gradients and icons
   const renderFlashcardsTab = () => {
     if (flashcards.length === 0) {
       return (
@@ -1148,24 +1785,19 @@ Start with "graph TD" or "graph LR" and use proper Mermaid syntax.`;
         </View>
       );
     }
-
     const card = flashcards[currentFlashcard];
-
+    const gradient = cardColors[card.type] || ["#9B5DE5", "#7C3AED"];
     return (
       <View style={styles.flashcardContainer}>
         <Text style={styles.flashcardCounter}>
           Card {currentFlashcard + 1} of {flashcards.length}
         </Text>
-
         <TouchableOpacity
           style={styles.flashcard}
           onPress={() => setShowFlashcardAnswer(!showFlashcardAnswer)}
           activeOpacity={0.9}
         >
-          <LinearGradient
-            colors={showFlashcardAnswer ? ["#10B981", "#059669"] : ["#9B5DE5", "#7C3AED"]}
-            style={styles.flashcardGradient}
-          >
+          <LinearGradient colors={gradient} style={styles.flashcardGradient}>
             <Text style={styles.flashcardLabel}>
               {showFlashcardAnswer ? "Answer" : "Question"}
             </Text>
@@ -1173,18 +1805,21 @@ Start with "graph TD" or "graph LR" and use proper Mermaid syntax.`;
               {showFlashcardAnswer ? card.back : card.front}
             </Text>
             <Text style={styles.flashcardHint}>
-              {showFlashcardAnswer ? "Tap to see question" : "Tap to reveal answer"}
+              {showFlashcardAnswer
+                ? "Tap to see question"
+                : "Tap to reveal answer"}
             </Text>
           </LinearGradient>
         </TouchableOpacity>
-
         <View style={styles.flashcardControls}>
-          <TouchableOpacity style={styles.flashcardButton} onPress={previousFlashcard}>
+          <TouchableOpacity
+            style={styles.flashcardButton}
+            onPress={previousFlashcard}
+          >
             <MaterialIcons name="arrow-back" size={24} color="#9B5DE5" />
             <Text style={styles.flashcardButtonText}>Previous</Text>
           </TouchableOpacity>
-
-          <TouchableOpacity 
+          <TouchableOpacity
             style={styles.shuffleButton}
             onPress={() => {
               const shuffled = [...flashcards].sort(() => Math.random() - 0.5);
@@ -1195,17 +1830,20 @@ Start with "graph TD" or "graph LR" and use proper Mermaid syntax.`;
           >
             <MaterialIcons name="shuffle" size={24} color="#F59E0B" />
           </TouchableOpacity>
-
-          <TouchableOpacity style={styles.flashcardButton} onPress={nextFlashcard}>
+          <TouchableOpacity
+            style={styles.flashcardButton}
+            onPress={nextFlashcard}
+          >
             <Text style={styles.flashcardButtonText}>Next</Text>
             <MaterialIcons name="arrow-forward" size={24} color="#9B5DE5" />
           </TouchableOpacity>
         </View>
-
         <View style={styles.flashcardStats}>
           <View style={styles.flashcardStat}>
             <MaterialIcons name="style" size={20} color="#9B5DE5" />
-            <Text style={styles.flashcardStatText}>{flashcards.length} cards</Text>
+            <Text style={styles.flashcardStatText}>
+              {flashcards.length} cards
+            </Text>
           </View>
           <View style={styles.flashcardStat}>
             <MaterialIcons name="trending-up" size={20} color="#10B981" />
@@ -1216,57 +1854,228 @@ Start with "graph TD" or "graph LR" and use proper Mermaid syntax.`;
     );
   };
 
+  // I am enhancing the mind map to use field-specific fallback diagrams
+  const generateFallbackDiagram = () => {
+    if (academicField === "medical") {
+      return `graph TD\n  A[${notes.title}] --> B[Key Concepts]\n  B --> C[Topic 1]\n  B --> D[Topic 2]\n  C --> F[Clinical Application]`;
+    } else if (academicField === "law") {
+      return `mindmap\n  root((${notes.title}))\n    Concept 1\n    Concept 2`;
+    } else if (academicField === "engineering") {
+      return `graph TD\n  A[${notes.title}] --> B[Formula 1]\n  A --> C[Formula 2]`;
+    } else if (academicField === "finance") {
+      return `graph TD\n  A[${notes.title}] --> B[Market Concept]\n  B --> C[Calculation]`;
+    }
+    return `graph TD\n  A[${notes.title}] --> B[Section 1]\n  A --> C[Section 2]`;
+  };
   const renderMindMapTab = () => (
     <View style={styles.mindmapContainer}>
       <Text style={styles.mindmapTitle}>Mind Map View</Text>
-      
       <View style={styles.centralNode}>
         <Text style={styles.centralNodeText}>{notes.title}</Text>
       </View>
-
       <View style={styles.branchesContainer}>
-        {notes.sections && notes.sections.map((section, idx) => (
-          <View key={idx} style={styles.branchNode}>
-            <View style={[styles.nodeCircle, { backgroundColor: ['#9B5DE5', '#10B981', '#F59E0B', '#EF4444'][idx % 4] }]}>
-              <MaterialIcons name="circle" size={12} color="#FFF" />
+        {notes.sections &&
+          notes.sections.map((section, idx) => (
+            <View key={idx} style={styles.branchNode}>
+              <View
+                style={[
+                  styles.nodeCircle,
+                  {
+                    backgroundColor: [
+                      "#9B5DE5",
+                      "#10B981",
+                      "#F59E0B",
+                      "#EF4444",
+                    ][idx % 4],
+                  },
+                ]}
+              >
+                <MaterialIcons name="circle" size={12} color="#FFF" />
+              </View>
+              <View style={styles.nodeContent}>
+                <Text style={styles.nodeTitle}>{section.title}</Text>
+                {section.subtopics &&
+                  section.subtopics.map((sub, subIdx) => (
+                    <Text key={subIdx} style={styles.nodeSubtopic}>
+                      • {typeof sub === "string" ? sub : sub.name}
+                    </Text>
+                  ))}
+              </View>
             </View>
-            <View style={styles.nodeContent}>
-              <Text style={styles.nodeTitle}>{section.title}</Text>
-              {section.subtopics && section.subtopics.map((sub, subIdx) => (
-                <Text key={subIdx} style={styles.nodeSubtopic}>• {sub}</Text>
-              ))}
-            </View>
-          </View>
-        ))}
+          ))}
       </View>
-
       <View style={styles.mindmapLegend}>
         <MaterialIcons name="info-outline" size={16} color="#6B7280" />
         <Text style={styles.mindmapLegendText}>
           Visual representation of lecture structure and connections
         </Text>
       </View>
+      {/* Show fallback diagram code for copy/paste */}
+      <View style={{ marginTop: 24 }}>
+        <Text style={{ fontSize: 13, color: "#6B7280", fontStyle: "italic" }}>
+          Field-specific fallback diagram:
+        </Text>
+        <View
+          style={{
+            backgroundColor: "#F9FAFB",
+            borderRadius: 8,
+            padding: 8,
+            marginTop: 4,
+          }}
+        >
+          <Text style={{ fontFamily: "monospace", fontSize: 12 }}>
+            {generateFallbackDiagram()}
+          </Text>
+        </View>
+      </View>
     </View>
   );
+  // I am adding styles for the new UI elements
+  const extraStyles = {
+    viewModeContainer: {
+      flexDirection: "row",
+      justifyContent: "center",
+      alignItems: "center",
+      marginBottom: 12,
+      gap: 8,
+    },
+    viewModeButton: {
+      flexDirection: "row",
+      alignItems: "center",
+      paddingHorizontal: 12,
+      paddingVertical: 6,
+      borderRadius: 8,
+      backgroundColor: "#F3E8FF",
+      marginHorizontal: 2,
+    },
+    activeViewModeButton: {
+      backgroundColor: "#9B5DE5",
+    },
+    viewModeText: {
+      fontSize: 13,
+      color: "#6B7280",
+      marginLeft: 6,
+      fontWeight: "600",
+    },
+    activeViewModeText: {
+      color: "#fff",
+    },
+    fieldBadgeContainer: {
+      flexDirection: "row",
+      alignItems: "center",
+      alignSelf: "center",
+      backgroundColor: "#7C3AED",
+      borderRadius: 12,
+      paddingHorizontal: 12,
+      paddingVertical: 4,
+      marginBottom: 10,
+      marginTop: 2,
+      gap: 4,
+    },
+    fieldBadgeText: {
+      color: "#fff",
+      fontWeight: "600",
+      fontSize: 13,
+    },
+    formulaItem: {
+      backgroundColor: "#F3E8FF",
+      borderRadius: 12,
+      padding: 12,
+      marginBottom: 10,
+    },
+    formulaName: {
+      fontWeight: "700",
+      fontSize: 15,
+      color: "#8B5CF6",
+      marginBottom: 4,
+    },
+    formulaBox: {
+      backgroundColor: "#fff",
+      borderRadius: 8,
+      padding: 8,
+      marginBottom: 6,
+    },
+    formulaExpression: {
+      fontFamily: "monospace",
+      fontSize: 15,
+      color: "#6D28D9",
+    },
+    variablesContainer: {
+      marginBottom: 4,
+    },
+    variableName: {
+      fontWeight: "700",
+      color: "#7C3AED",
+    },
+    chemistryItem: {
+      backgroundColor: "#FCE7F3",
+      borderRadius: 12,
+      padding: 12,
+      marginBottom: 10,
+    },
+    chemistryReaction: {
+      fontWeight: "700",
+      fontSize: 15,
+      color: "#EC4899",
+      marginBottom: 4,
+    },
+    caseLawItem: {
+      backgroundColor: "#FEE2E2",
+      borderRadius: 12,
+      padding: 12,
+      marginBottom: 10,
+    },
+    caseName: {
+      fontWeight: "700",
+      fontSize: 15,
+      color: "#EF4444",
+      marginBottom: 4,
+    },
+    caseSection: {
+      flexDirection: "row",
+      alignItems: "flex-start",
+      marginBottom: 2,
+    },
+    caseLabel: {
+      fontWeight: "700",
+      color: "#EF4444",
+      marginRight: 4,
+    },
+    caseSignificance: {
+      flexDirection: "row",
+      alignItems: "center",
+      marginTop: 4,
+      gap: 4,
+    },
+  };
+
+  // I am merging the extra styles into the main styles object
+  Object.assign(styles, extraStyles);
 
   const renderEditTab = () => (
     <View style={styles.editContainer}>
       <Text style={styles.editTitle}>Edit Notes</Text>
-      
+
       <Text style={styles.editLabel}>Title</Text>
       <TextInput
         style={[styles.editInput, isDark && styles.editInputDark]}
         value={editedNotes?.title || ""}
-        onChangeText={(text) => setEditedNotes({...editedNotes, title: text})}
+        onChangeText={(text) => setEditedNotes({ ...editedNotes, title: text })}
         placeholder="Lecture title"
         placeholderTextColor={isDark ? "#9CA3AF" : "#6B7280"}
       />
 
       <Text style={styles.editLabel}>Summary</Text>
       <TextInput
-        style={[styles.editInput, styles.editTextArea, isDark && styles.editInputDark]}
+        style={[
+          styles.editInput,
+          styles.editTextArea,
+          isDark && styles.editInputDark,
+        ]}
         value={editedNotes?.summary || ""}
-        onChangeText={(text) => setEditedNotes({...editedNotes, summary: text})}
+        onChangeText={(text) =>
+          setEditedNotes({ ...editedNotes, summary: text })
+        }
         placeholder="Brief summary"
         placeholderTextColor={isDark ? "#9CA3AF" : "#6B7280"}
         multiline
@@ -1275,9 +2084,18 @@ Start with "graph TD" or "graph LR" and use proper Mermaid syntax.`;
 
       <Text style={styles.editLabel}>Key Points (one per line)</Text>
       <TextInput
-        style={[styles.editInput, styles.editTextArea, isDark && styles.editInputDark]}
-        value={editedNotes?.keyPoints?.join('\n') || ""}
-        onChangeText={(text) => setEditedNotes({...editedNotes, keyPoints: text.split('\n').filter(p => p.trim())})}
+        style={[
+          styles.editInput,
+          styles.editTextArea,
+          isDark && styles.editInputDark,
+        ]}
+        value={editedNotes?.keyPoints?.join("\n") || ""}
+        onChangeText={(text) =>
+          setEditedNotes({
+            ...editedNotes,
+            keyPoints: text.split("\n").filter((p) => p.trim()),
+          })
+        }
         placeholder="Enter key points"
         placeholderTextColor={isDark ? "#9CA3AF" : "#6B7280"}
         multiline
@@ -1285,7 +2103,7 @@ Start with "graph TD" or "graph LR" and use proper Mermaid syntax.`;
       />
 
       <View style={styles.editButtons}>
-        <TouchableOpacity 
+        <TouchableOpacity
           style={styles.cancelButton}
           onPress={() => {
             setEditedNotes(notes);
@@ -1295,10 +2113,7 @@ Start with "graph TD" or "graph LR" and use proper Mermaid syntax.`;
           <Text style={styles.cancelButtonText}>Cancel</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity 
-          style={styles.saveButton}
-          onPress={saveEditedNotes}
-        >
+        <TouchableOpacity style={styles.saveButton} onPress={saveEditedNotes}>
           <LinearGradient
             colors={["#10B981", "#059669"]}
             style={styles.saveButtonGradient}
@@ -1321,7 +2136,7 @@ Start with "graph TD" or "graph LR" and use proper Mermaid syntax.`;
       >
         {/* Back button to lecture list */}
         {notes && !showLectureList && (
-          <TouchableOpacity 
+          <TouchableOpacity
             style={styles.backButton}
             onPress={() => {
               setNotes(null);
@@ -1334,11 +2149,15 @@ Start with "graph TD" or "graph LR" and use proper Mermaid syntax.`;
           </TouchableOpacity>
         )}
 
-        <MaterialIcons name="auto-stories" size={32} color="rgba(255,255,255,0.3)" />
+        <MaterialIcons
+          name="auto-stories"
+          size={32}
+          color="rgba(255,255,255,0.3)"
+        />
         <Text style={styles.headerTitle}>
           {showLectureList ? "My Lectures" : "My Notes"}
         </Text>
-        
+
         {/* Search Bar - only show when viewing notes */}
         {notes && !showLectureList && (
           <View style={styles.searchContainer}>
@@ -1352,7 +2171,13 @@ Start with "graph TD" or "graph LR" and use proper Mermaid syntax.`;
               onFocus={() => setShowSearch(true)}
             />
             {searchQuery.length > 0 && (
-              <TouchableOpacity onPress={() => { setSearchQuery(""); setSearchResults([]); setShowSearch(false); }}>
+              <TouchableOpacity
+                onPress={() => {
+                  setSearchQuery("");
+                  setSearchResults([]);
+                  setShowSearch(false);
+                }}
+              >
                 <MaterialIcons name="close" size={20} color="#9CA3AF" />
               </TouchableOpacity>
             )}
@@ -1363,19 +2188,28 @@ Start with "graph TD" or "graph LR" and use proper Mermaid syntax.`;
           <View style={styles.badgesContainer}>
             {dataSource && (
               <View style={styles.sourceBadge}>
-                <MaterialIcons 
-                  name={dataSource === 'firestore' ? 'cloud' : 'storage'} 
-                  size={12} 
-                  color="rgba(255,255,255,0.9)" 
+                <MaterialIcons
+                  name={dataSource === "firestore" ? "cloud" : "storage"}
+                  size={12}
+                  color="rgba(255,255,255,0.9)"
                 />
                 <Text style={styles.sourceBadgeText}>
-                  {dataSource === 'firestore' ? 'Cloud' : 'Local'}
+                  {dataSource === "firestore" ? "Cloud" : "Local"}
                 </Text>
               </View>
             )}
             {aiProvider && (
-              <View style={[styles.sourceBadge, { backgroundColor: 'rgba(16, 185, 129, 0.3)' }]}>
-                <MaterialIcons name="auto-awesome" size={12} color="rgba(255,255,255,0.9)" />
+              <View
+                style={[
+                  styles.sourceBadge,
+                  { backgroundColor: "rgba(16, 185, 129, 0.3)" },
+                ]}
+              >
+                <MaterialIcons
+                  name="auto-awesome"
+                  size={12}
+                  color="rgba(255,255,255,0.9)"
+                />
                 <Text style={styles.sourceBadgeText}>{aiProvider}</Text>
               </View>
             )}
@@ -1388,7 +2222,8 @@ Start with "graph TD" or "graph LR" and use proper Mermaid syntax.`;
         <View style={styles.searchResultsContainer}>
           <ScrollView style={styles.searchResults}>
             <Text style={styles.searchResultsTitle}>
-              Found {searchResults.length} result{searchResults.length !== 1 ? 's' : ''}
+              Found {searchResults.length} result
+              {searchResults.length !== 1 ? "s" : ""}
             </Text>
             {searchResults.map((result, idx) => (
               <TouchableOpacity
@@ -1403,10 +2238,16 @@ Start with "graph TD" or "graph LR" and use proper Mermaid syntax.`;
                   }
                 }}
               >
-                <MaterialIcons 
-                  name={result.type === "definition" ? "menu-book" : result.type === "section" ? "folder" : "label"} 
-                  size={20} 
-                  color="#9B5DE5" 
+                <MaterialIcons
+                  name={
+                    result.type === "definition"
+                      ? "menu-book"
+                      : result.type === "section"
+                        ? "folder"
+                        : "label"
+                  }
+                  size={20}
+                  color="#9B5DE5"
                 />
                 <View style={styles.searchResultContent}>
                   <Text style={styles.searchResultText}>{result.content}</Text>
@@ -1425,19 +2266,24 @@ Start with "graph TD" or "graph LR" and use proper Mermaid syntax.`;
             { key: "notes", icon: "article", label: "Notes" },
             { key: "flashcards", icon: "style", label: "Flashcards" },
             { key: "mindmap", icon: "account-tree", label: "Mind Map" },
-            { key: "edit", icon: "edit", label: "Edit" }
-          ].map(tab => (
+            { key: "edit", icon: "edit", label: "Edit" },
+          ].map((tab) => (
             <TouchableOpacity
               key={tab.key}
               style={[styles.tab, activeTab === tab.key && styles.activeTab]}
               onPress={() => setActiveTab(tab.key)}
             >
-              <MaterialIcons 
-                name={tab.icon} 
-                size={20} 
-                color={activeTab === tab.key ? "#9B5DE5" : "#9CA3AF"} 
+              <MaterialIcons
+                name={tab.icon}
+                size={20}
+                color={activeTab === tab.key ? "#9B5DE5" : "#9CA3AF"}
               />
-              <Text style={[styles.tabText, activeTab === tab.key && styles.activeTabText]}>
+              <Text
+                style={[
+                  styles.tabText,
+                  activeTab === tab.key && styles.activeTabText,
+                ]}
+              >
                 {tab.label}
               </Text>
             </TouchableOpacity>
@@ -1446,7 +2292,7 @@ Start with "graph TD" or "graph LR" and use proper Mermaid syntax.`;
       )}
 
       {/* Content */}
-      <ScrollView 
+      <ScrollView
         style={styles.content}
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.scrollContent}
@@ -1460,11 +2306,11 @@ Start with "graph TD" or "graph LR" and use proper Mermaid syntax.`;
         }
       >
         {loading ? (
-          <Animated.View 
+          <Animated.View
             style={[
               styles.loadingContainer,
               isDark && styles.loadingContainerDark,
-              { opacity: fadeAnim }
+              { opacity: fadeAnim },
             ]}
           >
             <Animated.View style={{ transform: [{ scale: fadeAnim }] }}>
@@ -1473,7 +2319,9 @@ Start with "graph TD" or "graph LR" and use proper Mermaid syntax.`;
             <Text style={[styles.loadingTitle, isDark && styles.textDark]}>
               AI Processing Your Lecture
             </Text>
-            <Text style={[styles.loadingText, isDark && styles.textSecondaryDark]}>
+            <Text
+              style={[styles.loadingText, isDark && styles.textSecondaryDark]}
+            >
               Organizing content, extracting key points, creating structure...
             </Text>
           </Animated.View>
@@ -1497,33 +2345,54 @@ Start with "graph TD" or "graph LR" and use proper Mermaid syntax.`;
         onRequestClose={() => setShowDiagramModal(false)}
       >
         <View style={styles.modalOverlay}>
-          <View style={[styles.diagramModal, isDark && styles.diagramModalDark]}>
+          <View
+            style={[styles.diagramModal, isDark && styles.diagramModalDark]}
+          >
             <View style={styles.diagramModalHeader}>
-              <Text style={[styles.diagramModalTitle, isDark && styles.textDark]}>
+              <Text
+                style={[styles.diagramModalTitle, isDark && styles.textDark]}
+              >
                 Generated Diagram
               </Text>
               <TouchableOpacity onPress={() => setShowDiagramModal(false)}>
-                <MaterialIcons name="close" size={24} color={isDark ? "#F9FAFB" : "#1F2937"} />
+                <MaterialIcons
+                  name="close"
+                  size={24}
+                  color={isDark ? "#F9FAFB" : "#1F2937"}
+                />
               </TouchableOpacity>
             </View>
 
             <ScrollView style={styles.diagramContent}>
-              <Text style={[styles.diagramCodeLabel, isDark && styles.textSecondaryDark]}>
+              <Text
+                style={[
+                  styles.diagramCodeLabel,
+                  isDark && styles.textSecondaryDark,
+                ]}
+              >
                 Mermaid Diagram Code:
               </Text>
-              <View style={[styles.diagramCodeContainer, isDark && styles.diagramCodeContainerDark]}>
+              <View
+                style={[
+                  styles.diagramCodeContainer,
+                  isDark && styles.diagramCodeContainerDark,
+                ]}
+              >
                 <Text style={[styles.diagramCode, isDark && styles.textDark]}>
                   {generatedDiagram}
                 </Text>
               </View>
-              
-              <Text style={[styles.diagramHint, isDark && styles.textSecondaryDark]}>
-                💡 Copy this code and paste it into mermaid.live or any Mermaid-compatible viewer to see the visual diagram.
+
+              <Text
+                style={[styles.diagramHint, isDark && styles.textSecondaryDark]}
+              >
+                💡 Copy this code and paste it into mermaid.live or any
+                Mermaid-compatible viewer to see the visual diagram.
               </Text>
             </ScrollView>
 
             <View style={styles.diagramModalActions}>
-              <TouchableOpacity 
+              <TouchableOpacity
                 style={styles.diagramCopyButton}
                 onPress={() => {
                   Clipboard.setString(generatedDiagram);
@@ -1616,7 +2485,7 @@ const styles = StyleSheet.create({
     color: "rgba(255,255,255,0.9)",
     fontWeight: "600",
   },
-  
+
   // Lecture List Styles
   lectureListContainer: {
     flex: 1,
@@ -1711,7 +2580,7 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
     borderRadius: 8,
   },
-  
+
   searchResultsContainer: {
     position: "absolute",
     top: 180,
@@ -2307,7 +3176,7 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     color: "#FFFFFF",
   },
-  
+
   // Diagram Modal
   modalOverlay: {
     flex: 1,
@@ -2397,7 +3266,7 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     color: "#FFFFFF",
   },
-  
+
   textDark: {
     color: "#F9FAFB",
   },
