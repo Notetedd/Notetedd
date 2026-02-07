@@ -1,5 +1,5 @@
 import React, { useRef, useState, useEffect } from 'react';
-import { View, Text, StyleSheet, Dimensions, TouchableOpacity, Animated, ScrollView, Platform } from 'react-native';
+import { View, Text, StyleSheet, Dimensions, TouchableOpacity, Animated, ScrollView, Platform, Linking } from 'react-native';
 import { router } from 'expo-router';
 
 const { width, height } = Dimensions.get('window');
@@ -172,6 +172,17 @@ const OnboardingScreen = () => {
 
   const handleGetStarted = () => {
     router.push('/AuthScreen');
+  };
+
+  const handleOpenLink = async (url) => {
+    try {
+      const canOpen = await Linking.canOpenURL(url);
+      if (canOpen) {
+        await Linking.openURL(url);
+      }
+    } catch (error) {
+      console.error('Error opening link:', error);
+    }
   };
 
   const floatY = floatAnim.interpolate({
@@ -370,6 +381,24 @@ const OnboardingScreen = () => {
             <Text style={styles.getStartedText}>Get Started ⚡</Text>
           </TouchableOpacity>
         )}
+
+        {/* Legal Links */}
+        <View style={styles.legalContainer}>
+          <Text style={styles.legalText}>By continuing, you agree to our </Text>
+          <TouchableOpacity 
+            onPress={() => handleOpenLink('https://www.notetedd.com/termsofservice')}
+            activeOpacity={0.7}
+          >
+            <Text style={styles.legalLink}>Terms of Service</Text>
+          </TouchableOpacity>
+          <Text style={styles.legalText}> and </Text>
+          <TouchableOpacity 
+            onPress={() => handleOpenLink('https://www.notetedd.com/privacypolicy')}
+            activeOpacity={0.7}
+          >
+            <Text style={styles.legalLink}>Privacy Policy</Text>
+          </TouchableOpacity>
+        </View>
       </View>
     </View>
   );
@@ -592,6 +621,25 @@ const styles = StyleSheet.create({
     fontSize: isTablet ? 20 : 18,
     fontWeight: '900',
     letterSpacing: 0.5,
+  },
+  legalContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginTop: isSmallDevice ? 12 : 16,
+    paddingHorizontal: 10,
+  },
+  legalText: {
+    fontSize: isTablet ? 12 : isSmallDevice ? 10 : 11,
+    color: '#666666',
+    textAlign: 'center',
+  },
+  legalLink: {
+    fontSize: isTablet ? 12 : isSmallDevice ? 10 : 11,
+    color: '#9B5DE5',
+    textDecorationLine: 'underline',
+    fontWeight: '600',
   },
 });
 
