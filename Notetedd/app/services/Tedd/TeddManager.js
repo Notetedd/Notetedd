@@ -14,7 +14,7 @@ class TeddManager {
     
     this.geminiService = new GeminiService({
       apiKey: config.geminiApiKey,
-      model: 'gemini-2.0-flash-exp',
+      model: 'gemini-2.0-flash',
       temperature: 0.7,
     });
 
