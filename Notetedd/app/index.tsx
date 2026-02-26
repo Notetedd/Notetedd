@@ -378,7 +378,7 @@ const OnboardingScreen = () => {
             onPress={handleGetStarted}
             activeOpacity={0.85}
           >
-            <Text style={styles.getStartedText}>Get Started ⚡</Text>
+            <Text style={styles.getStartedText}>Get Started → </Text>
           </TouchableOpacity>
         )}
 
