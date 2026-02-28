@@ -1,7 +1,7 @@
 class GeminiService {
   constructor(config) {
     this.apiKey = config.apiKey;
-    this.modelName = config.model || 'gemini-2.0-flash-exp';
+    this.modelName = config.model || 'gemini-2.0-flash';
     this.temperature = config.temperature || 0.9; // Higher temp for more personality
     this.maxTokens = config.maxTokens || 1024;
     
@@ -12,7 +12,85 @@ class GeminiService {
     // App integration
     this.navigation = null;
     this.dataService = null; // Service to access app data
+
+    // ── Rate limit handling ──────────────────────────────────────────────────
+    this._requestQueue = [];
+    this._isProcessingQueue = false;
+    this._lastRequestTime = 0;
+    this._minRequestInterval = 1000; // ms minimum gap between requests (1 req/sec)
+    // ────────────────────────────────────────────────────────────────────────
   }
+
+  // ── Rate-limit helpers ────────────────────────────────────────────────────
+
+  /**
+   * Wraps a fetch call with exponential-backoff retry on 429 responses.
+   * Retries up to maxRetries times; waits retryDelay ms (doubles each attempt).
+   */
+  async _fetchWithRetry(url, options, maxRetries = 4, retryDelay = 2000) {
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      const response = await fetch(url, options);
+
+      if (response.status !== 429) {
+        return response; // success or non-rate-limit error – let caller handle
+      }
+
+      if (attempt === maxRetries) {
+        // Last attempt still rate-limited – return so caller throws normal error
+        return response;
+      }
+
+      // Honour Retry-After header when present, otherwise exponential backoff
+      const retryAfterHeader = response.headers.get('Retry-After');
+      const waitMs = retryAfterHeader
+        ? parseInt(retryAfterHeader, 10) * 1000
+        : retryDelay * Math.pow(2, attempt);
+
+      console.warn(
+        `Gemini API rate-limited (429). Retrying in ${waitMs / 1000}s… (attempt ${attempt + 1}/${maxRetries})`
+      );
+      await new Promise((resolve) => setTimeout(resolve, waitMs));
+    }
+  }
+
+  /**
+   * Enqueues an API call so concurrent callers don't hammer the endpoint.
+   * Each call waits for the previous one to finish + a minimum interval gap.
+   */
+  _enqueue(fn) {
+    return new Promise((resolve, reject) => {
+      this._requestQueue.push({ fn, resolve, reject });
+      if (!this._isProcessingQueue) {
+        this._processQueue();
+      }
+    });
+  }
+
+  async _processQueue() {
+    this._isProcessingQueue = true;
+    while (this._requestQueue.length > 0) {
+      const { fn, resolve, reject } = this._requestQueue.shift();
+
+      // Enforce minimum gap between requests
+      const elapsed = Date.now() - this._lastRequestTime;
+      if (elapsed < this._minRequestInterval) {
+        await new Promise((r) =>
+          setTimeout(r, this._minRequestInterval - elapsed)
+        );
+      }
+
+      try {
+        this._lastRequestTime = Date.now();
+        const result = await fn();
+        resolve(result);
+      } catch (err) {
+        reject(err);
+      }
+    }
+    this._isProcessingQueue = false;
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
 
   // Set navigation and data service references
   setNavigation(navigation) {
@@ -324,14 +402,18 @@ Remember: You're not just answering questions - you're an active study partner t
         },
       };
 
-      // Make API request
-      const response = await fetch(`${this.apiUrl}?key=${this.apiKey}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(requestBody),
-      });
+      // ── Make API request via queue + retry ──────────────────────────────
+      const response = await this._enqueue(() =>
+        this._fetchWithRetry(
+          `${this.apiUrl}?key=${this.apiKey}`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(requestBody),
+          }
+        )
+      );
+      // ────────────────────────────────────────────────────────────────────
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
@@ -378,6 +460,8 @@ Remember: You're not just answering questions - you're an active study partner t
         throw new Error('Network error. Please check your internet connection.');
       } else if (error.message.includes('401') || error.message.includes('403')) {
         throw new Error('Invalid API key. Please check your configuration.');
+      } else if (error.message.includes('429')) {
+        throw new Error('Too many requests. Please wait a moment and try again.');
       } else {
         throw new Error('I ran into an issue. Please try again in a moment.');
       }
@@ -614,14 +698,20 @@ Remember: You're not just answering questions - you're an active study partner t
       try {
         const messages = [{ role: 'user', parts: [{ text: summaryPrompt }] }];
         
-        const response = await fetch(`${this.apiUrl}?key=${this.apiKey}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: messages,
-            generationConfig: { temperature: 0.5, maxOutputTokens: 500 },
-          }),
-        });
+        // Use queue + retry for the summarize call too
+        const response = await this._enqueue(() =>
+          this._fetchWithRetry(
+            `${this.apiUrl}?key=${this.apiKey}`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                contents: messages,
+                generationConfig: { temperature: 0.5, maxOutputTokens: 500 },
+              }),
+            }
+          )
+        );
         
         const data = await response.json();
         const summary = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
