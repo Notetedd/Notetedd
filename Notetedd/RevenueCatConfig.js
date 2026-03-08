@@ -1,126 +1,127 @@
-// // RevenueCatConfig.js (place this in your project root or config folder)
-// import Purchases from 'react-native-purchases';
-// import { Platform } from 'react-native';
+/**
+ * src/config/revenuecat.js — NoteTedd
+ * Central RevenueCat configuration.
+ */
 
-// // Your RevenueCat API Keys
-// const API_KEYS = {
-//   ios: 'test_dQcODruiTgpkJTXoteRQVmSVwqa', // Replace with your iOS API key from RevenueCat dashboard
-//   android: 'test_dQcODruiTgpkJTXoteRQVmSVwqa', // Replace with your Android API key from RevenueCat dashboard
-// };
+import { Platform } from "react-native";
 
-// // For testing, you can use the test key provided
-// const USE_TEST_KEY = true; // Set to false when you have real API keys
-// const TEST_KEY = 'test_dQcODruiTgpkJTXoteRQVmSVwqa';
+export const RC_API_KEY = Platform.select({
+  ios:     process.env.EXPO_PUBLIC_REVENUECAT_IOS_KEY     ?? "",
+  android: process.env.EXPO_PUBLIC_REVENUECAT_ANDROID_KEY ?? "",
+  default: process.env.EXPO_PUBLIC_REVENUECAT_IOS_KEY     ?? "",
+});
 
-// // Entitlement identifier (configure this in RevenueCat dashboard)
-// export const ENTITLEMENT_ID = 'pro'; // This unlocks "Notetedd Pro"
+export const ENTITLEMENT_ID = "premium";
+export const OFFERING_ID    = "default";
 
-// // Offering identifiers (these match your RevenueCat dashboard configuration)
-// export const OFFERING_IDS = {
-//   DEFAULT: 'default', // Your default offering
-// };
+export const TRIAL_CONFIG = {
+  durationDays:    21,
+  warningDayOne:   14,
+  warningDayTwo:   18,
+  warningDayThree: 20,
+};
 
-// // Product identifiers (these match your RevenueCat product setup)
-// export const PRODUCT_IDS = {
-//   MONTHLY: 'monthly',
-//   THREE_MONTH: 'three_month', // Semester
-//   YEARLY: 'yearly', // Academic year
-//   LIFETIME: 'lifetime',
-// };
+export const FREE_LIMITS = {
+  transcriptionsPerWeek: 3,
+  quizzesPerWeek:        2,
+  uploadsPerWeek:        3,
+  audioNotesPerWeek:     3,
+  notesOrganizePerWeek:  3,
+  classroomSync:         false,
+};
 
-// /**
-//  * Initialize RevenueCat SDK
-//  * Call this once when your app starts (typically in App.js)
-//  */
-// export const initializeRevenueCat = async (userId = null) => {
-//   try {
-//     // Use test key if configured, otherwise use platform-specific key
-//     let apiKey;
-//     if (USE_TEST_KEY) {
-//       apiKey = TEST_KEY;
-//       console.log('🧪 Using RevenueCat test API key');
-//     } else {
-//       apiKey = Platform.select({
-//         ios: API_KEYS.ios,
-//         android: API_KEYS.android,
-//       });
-//     }
+export const FEATURES = {
+  TRANSCRIPTION:  "transcriptions",
+  QUIZ:           "quizzes",
+  UPLOAD:         "uploads",
+  AUDIO_NOTES:    "audioNotes",
+  NOTES_ORGANIZE: "notesOrganize",
+  CLASSROOM_SYNC: "classroomSync",
+};
 
-//     if (!apiKey) {
-//       console.error('RevenueCat API key not configured for this platform');
-//       return false;
-//     }
+// ─── Subscription Plans ───────────────────────────────────────
+export const PLANS = [
+  {
+    id:          "notetedd_premium_weekly",
+    rcIdentifier: "$rc_weekly",
+    label:       "Weekly",
+    price:       "$1.99",
+    period:      "week",
+    perMonth:    "$7.96/mo",
+    badge:       null,
+    highlight:   false,
+    saving:      null,
+  },
+  {
+    id:          "notetedd_premium_monthly",
+    rcIdentifier: "$rc_monthly",
+    label:       "Monthly",
+    price:       "$6.99",
+    period:      "month",
+    perMonth:    "$6.99/mo",
+    badge:       null,
+    highlight:   false,
+    saving:      null,
+  },
+  {
+    id:          "notetedd_premium_semester",
+    rcIdentifier: "$rc_three_month",
+    label:       "Semester",
+    price:       "$19.99",
+    period:      "3 months",
+    perMonth:    "$6.66/mo",
+    badge:       "MOST POPULAR",
+    highlight:   true,
+    saving:      "Save 5%",
+  },
+  {
+    id:          "notetedd_premium_yearly",
+    rcIdentifier: "$rc_annual",
+    label:       "Annual",
+    price:       "$29.99",
+    period:      "year",
+    perMonth:    "$2.50/mo",
+    badge:       "BEST VALUE",
+    highlight:   false,
+    saving:      "Save 69%",
+  },
+];
 
-//     // Configure SDK
-//     await Purchases.configure({ 
-//       apiKey,
-//       appUserID: userId, // Optional: pass user ID for user identification
-//     });
-
-//     // Enable debug logs in development
-//     if (__DEV__) {
-//       await Purchases.setLogLevel(Purchases.LOG_LEVEL.DEBUG);
-//     }
-
-//     console.log('✅ RevenueCat initialized successfully');
-//     return true;
-//   } catch (error) {
-//     console.error('❌ Error initializing RevenueCat:', error);
-//     return false;
-//   }
-// };
-
-// /**
-//  * Set user attributes for better analytics
-//  */
-// export const setUserAttributes = async (attributes = {}) => {
-//   try {
-//     // Set custom attributes
-//     if (attributes.email) {
-//       await Purchases.setEmail(attributes.email);
-//     }
-//     if (attributes.displayName) {
-//       await Purchases.setDisplayName(attributes.displayName);
-//     }
-//     if (attributes.phoneNumber) {
-//       await Purchases.setPhoneNumber(attributes.phoneNumber);
-//     }
-    
-//     // Set custom user attributes
-//     if (attributes.custom) {
-//       for (const [key, value] of Object.entries(attributes.custom)) {
-//         await Purchases.setAttributes({ [key]: value });
-//       }
-//     }
-    
-//     console.log('✅ User attributes set successfully');
-//   } catch (error) {
-//     console.error('❌ Error setting user attributes:', error);
-//   }
-// };
-
-// /**
-//  * Identify user (login)
-//  */
-// export const identifyUser = async (userId) => {
-//   try {
-//     await Purchases.logIn(userId);
-//     console.log('✅ User identified:', userId);
-//   } catch (error) {
-//     console.error('❌ Error identifying user:', error);
-//     throw error;
-//   }
-// };
-
-// /**
-//  * Reset user (logout)
-//  */
-// export const resetUser = async () => {
-//   try {
-//     await Purchases.logOut();
-//     console.log('✅ User logged out');
-//   } catch (error) {
-//     console.error('❌ Error logging out user:', error);
-//     throw error;
-//   }
-// // };
+export const PAYWALL_FEATURES = [
+  {
+    icon:        "mic",
+    title:       "Unlimited Transcriptions",
+    free:        "3/week",
+    premium:     "Unlimited",
+  },
+  {
+    icon:        "quiz",
+    title:       "Unlimited Quizzes",
+    free:        "2/week",
+    premium:     "Unlimited",
+  },
+  {
+    icon:        "upload-file",
+    title:       "PDF & Image Upload",
+    free:        "3/week",
+    premium:     "Unlimited",
+  },
+  {
+    icon:        "headphones",
+    title:       "Audio Notes",
+    free:        "3/week",
+    premium:     "Unlimited",
+  },
+  {
+    icon:        "auto-stories",
+    title:       "Notes Organisation",
+    free:        "3/week",
+    premium:     "Unlimited",
+  },
+  {
+    icon:        "school",
+    title:       "Classroom Sync",
+    free:        "Locked",
+    premium:     "Full Access",
+  },
+];
