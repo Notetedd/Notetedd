@@ -247,7 +247,7 @@ const SessionCard = ({ session, onStart, onGenerate, onRegen, generatingQuiz, ca
               {[
                 { icon: "quiz",         color: T.violetBr, text: `${session.quiz.questions.length} Qs` },
                 { icon: "timelapse",    color: T.goldBr,   text: `~${Math.ceil(session.quiz.questions.length * 1.5)}m` },
-                { icon: "psychology",   color: T.tealBr,   text: "AI graded" },
+                { icon: "psychology",   color: T.tealBr,   text: "Tedd graded" },
               ].map(({ icon, color, text }) => (
                 <View key={icon} style={{ flexDirection: "row", alignItems: "center", gap: 5, flex: 1, justifyContent: "center" }}>
                   <MaterialIcons name={icon} size={13} color={color} />
@@ -465,7 +465,7 @@ const QuestionCard = React.memo(({
             color={isRevealed ? T.violetBr : colors.textMuted}
           />
           <Text style={[A.revealBtnTxt, { color: isRevealed ? T.violetBr : colors.textMuted }]}>
-            {isRevealed ? "Hide Model Answer" : "Show Model Answer"}
+            {isRevealed ? "Hide Tedd's Answer" : "Show Tedd's Answer"}
           </Text>
         </TouchableOpacity>
 
@@ -474,7 +474,7 @@ const QuestionCard = React.memo(({
           <View style={[A.answerPanel, { backgroundColor: T.sa(0.07), borderColor: T.sa(0.22) }]}>
             <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: sp(1.25) }}>
               <MaterialIcons name="check-circle" size={15} color={T.successBr} />
-              <Label color={T.successBr}>Model Answer</Label>
+              <Label color={T.successBr}>Tedd's Answer</Label>
             </View>
             <Text style={[A.answerTxt, { color: colors.textSub }]}>{question.answer}</Text>
             {question.rubric && (
@@ -920,7 +920,7 @@ Score: 2=Correct, 1=Partial, 0=Incorrect`;
           Choose{" "}<Text style={{ fontStyle: "italic", color: T.violetBr }}>Difficulty</Text>
         </Text>
         <Text style={[A.sheetSub, { color: colors.textMuted }]}>
-          The AI tailors questions to the level you select.
+          Tedd tailors questions to the level you select.
         </Text>
 
         {Object.entries(DIFFICULTY_MODES).map(([key, cfg]) => (
@@ -1185,7 +1185,7 @@ Score: 2=Correct, 1=Partial, 0=Incorrect`;
               </View>
               <Text style={[A.emptyTitle, { color: colors.text }]}>No Quizzes Yet</Text>
               <Text style={[A.emptySub,   { color: colors.textMuted }]}>
-                Record and organise lectures to generate AI-powered quizzes.
+                Record and organise lectures to generate  quizzes.
               </Text>
               <TouchableOpacity
                 style={[A.goBtn, { backgroundColor: T.teal, shadowColor: T.teal }]}
@@ -1202,7 +1202,7 @@ Score: 2=Correct, 1=Partial, 0=Incorrect`;
               <View style={[A.infoBanner, { backgroundColor: T.va(0.08), borderColor: T.va(0.2) }]}>
                 <MaterialIcons name="auto-awesome" size={15} color={T.violetBr} />
                 <Text style={[A.infoBannerTxt, { color: colors.textSub }]}>
-                  AI-generated quizzes with conceptual answer grading. Choose Simple, Medium, or Difficult.
+                  Tedd-generated quizzes with conceptual answer grading. Choose Simple, Medium, or Difficult.
                 </Text>
               </View>
 

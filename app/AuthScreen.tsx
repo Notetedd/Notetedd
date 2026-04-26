@@ -211,13 +211,15 @@ export default function AuthScreen() {
     }
   };
 
-  // I handle the Firebase credential flow shared between mobile and web Google sign-up
+  // I handle the Firebase credential flow shared between mobile and web Google sign-up.
+  // On success, users go directly to HomeScreen — no need to re-authenticate via LoginScreen.
   const handleGoogleCredential = async (credential) => {
     try {
       setIsLoading(true);
       const result = await signInWithCredential(auth, credential);
       const user = result.user;
 
+      // I use merge:true so returning Google users don't overwrite their existing data
       await setDoc(doc(db, "users", user.uid), {
         fullName: user.displayName || "Google User",
         email: user.email,
@@ -226,8 +228,10 @@ export default function AuthScreen() {
         photoURL: user.photoURL || null,
       }, { merge: true });
 
+      const fullName = user.displayName || "User";
       showToast("success", "Account ready", "Signed up with Google successfully.");
-      animateExit(() => navigation.navigate("/HomeScreen"));
+      // I navigate directly to HomeScreen — the user is already authenticated
+      animateExit(() => router.replace({ pathname: "/HomeScreen", params: { username: fullName } }));
     } catch (error) {
       console.error("Google credential error:", error.code);
       showToast("error", "Error", "Google sign-up failed. Please try again.");
@@ -236,7 +240,8 @@ export default function AuthScreen() {
     }
   };
 
-  // I use a web-specific popup flow for Google sign-up on browsers
+  // I use a web-specific popup flow for Google sign-up on browsers.
+  // On success, users go directly to HomeScreen — no need to re-authenticate via LoginScreen.
   const handleWebGoogleSignUp = async () => {
     try {
       setIsLoading(true);
@@ -244,6 +249,7 @@ export default function AuthScreen() {
       const result = await signInWithPopup(auth, provider);
       const user = result.user;
 
+      // I use merge:true so returning Google users don't overwrite their existing data
       await setDoc(doc(db, "users", user.uid), {
         fullName: user.displayName || "Google User",
         email: user.email,
@@ -252,8 +258,10 @@ export default function AuthScreen() {
         photoURL: user.photoURL || null,
       }, { merge: true });
 
+      const fullName = user.displayName || "User";
       showToast("success", "Account ready", "Signed up with Google successfully.");
-      animateExit(() => navigation.navigate("/HomeScreen"));
+      // I navigate directly to HomeScreen — the user is already authenticated
+      animateExit(() => router.replace({ pathname: "/HomeScreen", params: { username: fullName } }));
     } catch (error) {
       console.error("Web Google sign-up error:", error.code);
       const codeMap = {
@@ -366,7 +374,7 @@ export default function AuthScreen() {
                   <View style={[styles.brandRule, { backgroundColor: COLORS.accent }]} />
                   <View style={[styles.brandRule, { backgroundColor: COLORS.purple }]} />
                 </View>
-                <Text style={styles.brandTagline}>Learning redefined</Text>
+                <Text style={styles.brandTagline}>Learning Made Easier</Text>
               </View>
             </Animated.View>
 
@@ -386,7 +394,7 @@ export default function AuthScreen() {
                 <View style={[styles.cardAccentSegment, { backgroundColor: COLORS.purple }]} />
               </View>
 
-              <Text style={styles.formTitle}>Create account</Text>
+              <Text style={styles.formTitle}>Sign Up</Text>
               <Text style={styles.formSubtitle}>Join thousands of students learning smarter</Text>
 
               {/* Full Name Field */}

@@ -366,7 +366,7 @@ export default function LoginScreen() {
               {/* I use a top accent border to anchor the card visually */}
               <View style={styles.cardAccentBorder} />
 
-              <Text style={styles.formTitle}>Sign in</Text>
+              <Text style={styles.formTitle}>Log in</Text>
               <Text style={styles.formSubtitle}>Continue your learning journey</Text>
 
               {/* Email Field */}

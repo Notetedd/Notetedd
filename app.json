@@ -1,0 +1,150 @@
+{
+  "expo": {
+    "name": "Notetedd",
+    "slug": "Notetedd",
+    "version": "1.1.0",
+    "orientation": "portrait",
+    "icon": "./public/notetedd-icon-1024.png",
+    "scheme": "notetedd",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "ios": {
+      "infoPlist": {
+        "NSMicrophoneUsageDescription": "Notetedd needs microphone access to enable voice commands with Tedd, your AI study assistant.",
+        "NSSpeechRecognitionUsageDescription": "Notetedd uses speech recognition to understand your voice commands.",
+        "supportsTablet": true,
+        "NSUserTrackingUsageDescription": "We use tracking to improve your experience and show relevant subscription offers. Your data is safe and will never be shared with third parties.",
+        "SKAdNetworkItems": [
+          {
+            "SKAdNetworkIdentifier": "2fnua5tdw4.skadnetwork"
+          },
+          {
+            "SKAdNetworkIdentifier": "2fnua5tdw4.skadnetwork"
+          }
+        ]
+      },
+      "bundleIdentifier": "com.notetedd.app"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#E6F4FE",
+        "foregroundImage": "./public/notetedd-playstore-icon-512x512.png"
+      },
+      "edgeToEdgeEnabled": true,
+      "predictiveBackGestureEnabled": false,
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.INTERNET",
+        "android.permission.RECEIVE_BOOT_COMPLETED",
+        "android.permission.VIBRATE",
+        "com.google.android.gms.permission.AD_ID",
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.INTERNET",
+        "android.permission.RECEIVE_BOOT_COMPLETED",
+        "android.permission.VIBRATE",
+        "com.google.android.gms.permission.AD_ID"
+      ],
+      "package": "com.notetedd.app"
+    },
+    "web": {
+      "output": "static",
+      "favicon": "./public/icon.png",
+      "permissions": [
+        "camera",
+        "bluetooth"
+      ]
+    },
+    "plugins": [
+      "expo-router",
+      "expo-dev-client",
+      [
+        "expo-notifications",
+        {
+          "image": "./public/icon.png",
+          "imageWidth": 200,
+          "width": 1024,
+          "height": 800,
+          "resizeMode": "contain",
+          "backgroundColor": "#ffffff",
+          "startUrl": "/",
+          "scope": "/",
+          "sound": [
+            {
+              "name": "notification",
+              "file": "./assets/notification.mp3"
+            }
+          ]
+        }
+      ],
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "Allow $(PRODUCT_NAME) to access your microphone."
+        }
+      ],
+      [
+        "expo-font",
+        {
+          "fonts": [
+      "node_modules/@expo/vector-icons/build/vendor/react-native-vector-icons/Fonts/MaterialIcons.ttf",
+      "node_modules/@expo/vector-icons/build/vendor/react-native-vector-icons/Fonts/MaterialCommunityIcons.ttf",
+      "node_modules/@expo/vector-icons/build/vendor/react-native-vector-icons/Fonts/Ionicons.ttf",
+      "node_modules/@expo/vector-icons/build/vendor/react-native-vector-icons/Fonts/FontAwesome.ttf",
+      "node_modules/@expo/vector-icons/build/vendor/react-native-vector-icons/Fonts/FontAwesome5_Regular.ttf",
+      "node_modules/@expo/vector-icons/build/vendor/react-native-vector-icons/Fonts/FontAwesome5_Solid.ttf"
+    ]
+        }
+      ],
+      "expo-image-picker",
+      "expo-video",
+      "expo-build-properties",
+      "expo-localization",
+      "expo-tracking-transparency",
+      "expo-asset"
+    ],
+    "experiments": {
+      "typedRoutes": true,
+      "reactCompiler": true
+    },
+    "extra": {
+      "geminiApiKey": "${EXPO_PUBLIC_GEMINI_API_KEY}",
+      "router": {},
+      "eas": {
+        "build": {
+          "channel": "main",
+          "experimental": {
+            "ios": {
+              "appExtensions": [
+                {
+                  "targetName": "NoteteddWidgetExtension",
+                  "bundleIdentifier": "com.notetedd.app.NoteteddWidgetExtension",
+                  "entitlements": {
+                    "com.apple.security.application-groups": [
+                      "group.com.notetedd.app.expowidgets"
+                    ],
+                    "aps-environment": "production"
+                  }
+                }
+              ]
+            }
+          }
+        },
+        "projectId": "cb848cbe-cd58-4190-b349-851f3bffb3ca"
+      }
+    },
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/cb848cbe-cd58-4190-b349-851f3bffb3ca"
+    },
+    "assetBundlePatterns": [
+      "**/*",
+      "node_modules/@expo/vector-icons/build/vendor/react-native-vector-icons/Fonts/*.ttf"
+    ]
+  }
+}

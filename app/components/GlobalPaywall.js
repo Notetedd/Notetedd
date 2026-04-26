@@ -1,9 +1,12 @@
 /**
- 
+ * GlobalPaywall.js
  *
  * Modal paywall that slides up from the bottom.
  * Triggered globally via SubscriptionContext.setShowPaywall(true)
  * Built entirely in NoteTedd design system.
+ * 
+ * ✅ Prices are pulled from RevenueCat offerings (localized per country)
+ *    with fallback to hardcoded values if offerings aren't loaded yet.
  */
 
 import { MaterialIcons } from "@expo/vector-icons";
@@ -55,81 +58,39 @@ const sp = (n) => n * 8;
 // ─── Corner bracket marks (your signature UI element) ─────────
 const CornerMarks = ({ color = COLORS.violet, size = 12 }) => (
   <>
-    <View
-      style={[
-        styles.corner,
-        styles.cornerTL,
-        { borderColor: color, width: size, height: size },
-      ]}
-    />
-    <View
-      style={[
-        styles.corner,
-        styles.cornerTR,
-        { borderColor: color, width: size, height: size },
-      ]}
-    />
-    <View
-      style={[
-        styles.corner,
-        styles.cornerBL,
-        { borderColor: color, width: size, height: size },
-      ]}
-    />
-    <View
-      style={[
-        styles.corner,
-        styles.cornerBR,
-        { borderColor: color, width: size, height: size },
-      ]}
-    />
+    <View style={[styles.corner, styles.cornerTL, { borderColor: color, width: size, height: size }]} />
+    <View style={[styles.corner, styles.cornerTR, { borderColor: color, width: size, height: size }]} />
+    <View style={[styles.corner, styles.cornerBL, { borderColor: color, width: size, height: size }]} />
+    <View style={[styles.corner, styles.cornerBR, { borderColor: color, width: size, height: size }]} />
   </>
 );
 
 // ─── Feature row ──────────────────────────────────────────────
 const FeatureRow = ({ icon, title, free, premium, dark }) => (
-  <View
-    style={[
-      styles.featureRow,
-      { borderBottomColor: dark ? COLORS.darkBorder : COLORS.lightBorder },
-    ]}
-  >
+  <View style={[styles.featureRow, { borderBottomColor: dark ? COLORS.darkBorder : COLORS.lightBorder }]}>
     <View style={styles.featureLeft}>
-      <View
-        style={[styles.featureIconWrap, { backgroundColor: COLORS.violetGlow }]}
-      >
+      <View style={[styles.featureIconWrap, { backgroundColor: COLORS.violetGlow }]}>
         <MaterialIcons name={icon} size={16} color={COLORS.violet} />
       </View>
-      <Text
-        style={[
-          styles.featureTitle,
-          { color: dark ? COLORS.textDark : "#1a1a2e" },
-        ]}
-      >
+      <Text style={[styles.featureTitle, { color: dark ? COLORS.textDark : "#1a1a2e" }]}>
         {title}
       </Text>
     </View>
     <View style={styles.featureRight}>
-      <Text style={[styles.featureFree, { color: COLORS.textMuted }]}>
-        {free}
-      </Text>
-      <MaterialIcons
-        name="arrow-forward"
-        size={12}
-        color={COLORS.textMuted}
-        style={{ marginHorizontal: 4 }}
-      />
-      <Text style={[styles.featurePremium, { color: COLORS.teal }]}>
-        {premium}
-      </Text>
+      <Text style={[styles.featureFree, { color: COLORS.textMuted }]}>{free}</Text>
+      <MaterialIcons name="arrow-forward" size={12} color={COLORS.textMuted} style={{ marginHorizontal: 4 }} />
+      <Text style={[styles.featurePremium, { color: COLORS.teal }]}>{premium}</Text>
     </View>
   </View>
 );
 
 // ─── Plan card ────────────────────────────────────────────────
-const PlanCard = ({ plan, selected, onSelect, dark }) => {
+const PlanCard = ({ plan, selected, onSelect, dark, localizedPrice }) => {
   const isHighlight = plan.highlight;
   const isSelected = selected === plan.id;
+
+  // ✅ Use localized price from RC offerings, fallback to hardcoded
+  const displayPrice = localizedPrice ?? plan.price;
 
   return (
     <TouchableOpacity
@@ -142,28 +103,19 @@ const PlanCard = ({ plan, selected, onSelect, dark }) => {
             ? COLORS.violet
             : isHighlight
               ? COLORS.teal
-              : dark
-                ? COLORS.darkBorder
-                : COLORS.lightBorder,
+              : dark ? COLORS.darkBorder : COLORS.lightBorder,
           backgroundColor: isSelected
             ? COLORS.violetGlow
             : isHighlight
               ? COLORS.tealGlow
-              : dark
-                ? COLORS.darkCard
-                : COLORS.lightCard,
+              : dark ? COLORS.darkCard : COLORS.lightCard,
           borderWidth: isSelected ? 2 : isHighlight ? 1.5 : 1,
         },
       ]}
     >
       {/* Badge */}
       {plan.badge && (
-        <View
-          style={[
-            styles.planBadge,
-            { backgroundColor: isHighlight ? COLORS.teal : COLORS.violetDeep },
-          ]}
-        >
+        <View style={[styles.planBadge, { backgroundColor: isHighlight ? COLORS.teal : COLORS.violetDeep }]}>
           <Text style={styles.planBadgeText}>{plan.badge}</Text>
         </View>
       )}
@@ -173,52 +125,31 @@ const PlanCard = ({ plan, selected, onSelect, dark }) => {
 
       <View style={styles.planCardInner}>
         {/* Label */}
-        <Text
-          style={[
-            styles.planLabel,
-            {
-              color: isSelected
-                ? COLORS.violet
-                : dark
-                  ? COLORS.textDark
-                  : "#1a1a2e",
-            },
-          ]}
-        >
+        <Text style={[styles.planLabel, { color: isSelected ? COLORS.violet : dark ? COLORS.textDark : "#1a1a2e" }]}>
           {plan.label}
         </Text>
 
-        {/* Price */}
+        {/* Price — localized if available */}
         <View style={styles.planPriceRow}>
-          <Text
-            style={[
-              styles.planPrice,
-              { color: isHighlight ? COLORS.teal : COLORS.violet },
-            ]}
-          >
-            {plan.price}
+          <Text style={[styles.planPrice, { color: isHighlight ? COLORS.teal : COLORS.violet }]}>
+            {displayPrice}
           </Text>
           <Text style={[styles.planPeriod, { color: COLORS.textMuted }]}>
             /{plan.period}
           </Text>
         </View>
 
-        {/* Per month */}
-        <Text style={[styles.planPerMonth, { color: COLORS.textMuted }]}>
-          {plan.perMonth}
-        </Text>
+        {/* Per month equiv — only show if using hardcoded (localized doesn't have this) */}
+        {!localizedPrice && (
+          <Text style={[styles.planPerMonth, { color: COLORS.textMuted }]}>
+            {plan.perMonth}
+          </Text>
+        )}
 
         {/* Saving badge */}
         {plan.saving && (
-          <View
-            style={[
-              styles.savingBadge,
-              { backgroundColor: COLORS.gold + "22" },
-            ]}
-          >
-            <Text style={[styles.savingText, { color: COLORS.gold }]}>
-              {plan.saving}
-            </Text>
+          <View style={[styles.savingBadge, { backgroundColor: COLORS.gold + "22" }]}>
+            <Text style={[styles.savingText, { color: COLORS.gold }]}>{plan.saving}</Text>
           </View>
         )}
       </View>
@@ -228,11 +159,7 @@ const PlanCard = ({ plan, selected, onSelect, dark }) => {
         style={[
           styles.planSelectDot,
           {
-            borderColor: isSelected
-              ? COLORS.violet
-              : dark
-                ? COLORS.darkBorder
-                : COLORS.lightBorder,
+            borderColor: isSelected ? COLORS.violet : dark ? COLORS.darkBorder : COLORS.lightBorder,
             backgroundColor: isSelected ? COLORS.violet : "transparent",
           },
         ]}
@@ -270,30 +197,13 @@ export default function GlobalPaywall() {
   useEffect(() => {
     if (showPaywall) {
       Animated.parallel([
-        Animated.spring(slideAnim, {
-          toValue: 0,
-          damping: 20,
-          stiffness: 200,
-          useNativeDriver: true,
-        }),
-        Animated.timing(fadeAnim, {
-          toValue: 0.6,
-          duration: 300,
-          useNativeDriver: true,
-        }),
+        Animated.spring(slideAnim, { toValue: 0, damping: 20, stiffness: 200, useNativeDriver: true }),
+        Animated.timing(fadeAnim, { toValue: 0.6, duration: 300, useNativeDriver: true }),
       ]).start();
     } else {
       Animated.parallel([
-        Animated.timing(slideAnim, {
-          toValue: SCREEN_HEIGHT,
-          duration: 250,
-          useNativeDriver: true,
-        }),
-        Animated.timing(fadeAnim, {
-          toValue: 0,
-          duration: 200,
-          useNativeDriver: true,
-        }),
+        Animated.timing(slideAnim, { toValue: SCREEN_HEIGHT, duration: 250, useNativeDriver: true }),
+        Animated.timing(fadeAnim, { toValue: 0, duration: 200, useNativeDriver: true }),
       ]).start();
     }
   }, [showPaywall]);
@@ -301,23 +211,34 @@ export default function GlobalPaywall() {
   // ── Dismiss ────────────────────────────────────────────────
   const dismiss = () => setShowPaywall(false);
 
+  // ── Get localized price string from RC offerings ───────────
+  // Returns e.g. "₹89.00", "KSh 100.00", "$0.76" based on user's country
+  // Falls back to null if offerings not loaded yet (UI uses hardcoded fallback)
+  const getLocalizedPrice = (rcIdentifier) => {
+    if (!offerings) return null;
+    const pkg = offerings.availablePackages?.find(
+      (p) => p.identifier === rcIdentifier
+    );
+    return pkg?.product?.priceString ?? null;
+  };
+
+  // ── Get the selected plan's display price ─────────────────
+  const getSelectedPlanPrice = () => {
+    const plan = PLANS.find((p) => p.id === selectedPlan);
+    if (!plan) return "";
+    return getLocalizedPrice(plan.rcIdentifier) ?? plan.price;
+  };
+
   // ── Get contextual headline based on blocked feature ───────
   const getHeadline = () => {
     switch (paywallFeature) {
-      case FEATURES.TRANSCRIPTION:
-        return "Transcription limit reached";
-      case FEATURES.QUIZ:
-        return "Quiz limit reached";
-      case FEATURES.UPLOAD:
-        return "Upload limit reached";
-      case FEATURES.AUDIO_NOTES:
-        return "Audio notes limit reached";
-      case FEATURES.NOTES_ORGANIZE:
-        return "Notes organisation limit reached";
-      case FEATURES.CLASSROOM_SYNC:
-        return "Classroom Sync is Premium";
-      default:
-        return "Unlock NoteTedd Premium";
+      case FEATURES.TRANSCRIPTION:   return "Transcription limit reached";
+      case FEATURES.QUIZ:            return "Quiz limit reached";
+      case FEATURES.UPLOAD:          return "Upload limit reached";
+      case FEATURES.AUDIO_NOTES:     return "Audio notes limit reached";
+      case FEATURES.NOTES_ORGANIZE:  return "Notes organisation limit reached";
+      case FEATURES.CLASSROOM_SYNC:  return "Classroom Sync is Premium";
+      default:                       return "Unlock NoteTedd Premium";
     }
   };
 
@@ -332,69 +253,32 @@ export default function GlobalPaywall() {
   };
 
   // ── Handle purchase ────────────────────────────────────────
-  // const handlePurchase = async () => {
-  //   if (!offerings) return;
-
-  //   setLoading(true);
-  //   try {
-  //     // Find the matching package from RevenueCat offerings
-  //     const plan = PLANS.find((p) => p.id === selectedPlan);
-  //     const packages = offerings.availablePackages ?? [];
-  //     const pkg =
-  //       packages.find((p) => p.identifier === plan?.rcIdentifier) ??
-  //       packages[0];
-
-  //     if (!pkg) {
-  //       // Sandbox / no store account yet — show friendly message
-  //       alert(
-  //         "Purchases not available in this build. Connect your App Store / Play Store account first.",
-  //       );
-  //       setLoading(false);
-  //       return;
-  //     }
-
-  //     await purchaseSubscription(pkg);
-  //   } finally {
-  //     setLoading(false);
-  //   }
-  // };
-
   const handlePurchase = async () => {
-  // Debug — remove after fixing
-  console.log("[Paywall] offerings:", offerings);
-  console.log("[Paywall] selectedPlan:", selectedPlan);
-
-  if (!offerings) {
-    alert("Offerings not loaded yet. Please wait a moment and try again.");
-    return;
-  }
-
-  setLoading(true);
-  try {
-    const plan = PLANS.find((p) => p.id === selectedPlan);
-    const packages = offerings.availablePackages ?? [];
-
-    // Debug — remove after fixing
-    console.log("[Paywall] available packages:", packages.map(p => p.identifier));
-    console.log("[Paywall] looking for rcIdentifier:", plan?.rcIdentifier);
-
-    const pkg =
-      packages.find((p) => p.identifier === plan?.rcIdentifier) ??
-      packages[0]; // fallback to first available
-
-    console.log("[Paywall] selected pkg:", pkg?.identifier);
-
-    if (!pkg) {
-      alert("No packages available. Make sure products are set up in Google Play Console and RevenueCat dashboard.");
-      setLoading(false);
+    if (!offerings) {
+      alert("Offerings not loaded yet. Please wait a moment and try again.");
       return;
     }
 
-    await purchaseSubscription(pkg);
-  } finally {
-    setLoading(false);
-  }
-};
+    setLoading(true);
+    try {
+      const plan = PLANS.find((p) => p.id === selectedPlan);
+      const packages = offerings.availablePackages ?? [];
+
+      const pkg =
+        packages.find((p) => p.identifier === plan?.rcIdentifier) ??
+        packages[0]; // fallback to first available
+
+      if (!pkg) {
+        alert("No packages available. Make sure products are set up in Google Play Console and RevenueCat dashboard.");
+        setLoading(false);
+        return;
+      }
+
+      await purchaseSubscription(pkg);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   // ── Handle restore ─────────────────────────────────────────
   const handleRestore = async () => {
@@ -402,6 +286,9 @@ export default function GlobalPaywall() {
     await restorePurchases();
     setRestoring(false);
   };
+
+  // ── Selected plan info ─────────────────────────────────────
+  const selectedPlanData = PLANS.find((p) => p.id === selectedPlan);
 
   return (
     <Modal
@@ -428,12 +315,7 @@ export default function GlobalPaywall() {
       >
         {/* Handle bar */}
         <View style={styles.handleBar}>
-          <View
-            style={[
-              styles.handle,
-              { backgroundColor: dark ? COLORS.darkBorder : "#ccc" },
-            ]}
-          />
+          <View style={[styles.handle, { backgroundColor: dark ? COLORS.darkBorder : "#ccc" }]} />
         </View>
 
         <ScrollView
@@ -443,9 +325,7 @@ export default function GlobalPaywall() {
         >
           {/* ── Trial Banner ─────────────────────────────── */}
           {isInTrial && trialDaysLeft > 0 && (
-            <View
-              style={[styles.trialBanner, { backgroundColor: COLORS.violet }]}
-            >
+            <View style={[styles.trialBanner, { backgroundColor: COLORS.violet }]}>
               <CornerMarks color="rgba(255,255,255,0.3)" size={10} />
               <MaterialIcons name="hourglass-top" size={16} color="#fff" />
               <Text style={styles.trialBannerText}>
@@ -458,22 +338,7 @@ export default function GlobalPaywall() {
 
           {/* ── Header ───────────────────────────────────── */}
           <View style={styles.header}>
-            {/* Logo mark */}
-            <View
-              style={[styles.logoMark, { backgroundColor: COLORS.violetGlow }]}
-            >
-              <CornerMarks color={COLORS.violet} size={5} />
-              <Text style={[styles.logoMarkText, { color: COLORS.violet }]}>
-                Notetedd
-              </Text>
-            </View>
-
-            <Text
-              style={[
-                styles.headline,
-                { color: dark ? COLORS.textDark : "#0a0a0f" },
-              ]}
-            >
+            <Text style={[styles.headline, { color: dark ? COLORS.textDark : "#0a0a0f" }]}>
               {getHeadline()}
             </Text>
             <Text style={[styles.subheadline, { color: COLORS.textMuted }]}>
@@ -495,19 +360,11 @@ export default function GlobalPaywall() {
             <View style={styles.freeTrialInner}>
               <MaterialIcons name="stars" size={20} color={COLORS.gold} />
               <View style={{ flex: 1, marginLeft: sp(1) }}>
-                <Text
-                  style={[
-                    styles.freeTrialTitle,
-                    { color: dark ? COLORS.textDark : "#0a0a0f" },
-                  ]}
-                >
+                <Text style={[styles.freeTrialTitle, { color: dark ? COLORS.textDark : "#0a0a0f" }]}>
                   {TRIAL_CONFIG.durationDays}-day free trial included
                 </Text>
-                <Text
-                  style={[styles.freeTrialSub, { color: COLORS.textMuted }]}
-                >
-                  Try all premium features free. Cancel anytime before trial
-                  ends.
+                <Text style={[styles.freeTrialSub, { color: COLORS.textMuted }]}>
+                  Try all premium features free. Cancel anytime before trial ends.
                 </Text>
               </View>
             </View>
@@ -526,9 +383,18 @@ export default function GlobalPaywall() {
                   selected={selectedPlan}
                   onSelect={setSelectedPlan}
                   dark={dark}
+                  // ✅ Pass localized price — null if offerings not loaded yet
+                  localizedPrice={getLocalizedPrice(plan.rcIdentifier)}
                 />
               ))}
             </View>
+
+            {/* ✅ Currency notice — only shown when prices are localized */}
+            {offerings && (
+              <Text style={[styles.currencyNote, { color: COLORS.textMuted }]}>
+                Prices shown in your local currency
+              </Text>
+            )}
           </View>
 
           {/* ── Feature comparison ────────────────────────── */}
@@ -570,9 +436,8 @@ export default function GlobalPaywall() {
             ) : (
               <>
                 <Text style={styles.ctaText}>
-                  Start Free Trial —{" "}
-                  {PLANS.find((p) => p.id === selectedPlan)?.price}/
-                  {PLANS.find((p) => p.id === selectedPlan)?.period}
+                  {/* ✅ CTA also shows localized price */}
+                  Start Free Trial — {getSelectedPlanPrice()}/{selectedPlanData?.period}
                 </Text>
                 <MaterialIcons name="arrow-forward" size={18} color="#fff" />
               </>
@@ -591,13 +456,9 @@ export default function GlobalPaywall() {
                 {restoring ? "Restoring..." : "Restore purchases"}
               </Text>
             </TouchableOpacity>
-            <Text style={[styles.footerDot, { color: COLORS.textMuted }]}>
-              ·
-            </Text>
+            <Text style={[styles.footerDot, { color: COLORS.textMuted }]}>·</Text>
             <TouchableOpacity onPress={() => setShowPaywall(false)}>
-              <Text style={[styles.footerLink, { color: COLORS.textMuted }]}>
-                Maybe later
-              </Text>
+              <Text style={[styles.footerLink, { color: COLORS.textMuted }]}>Maybe later</Text>
             </TouchableOpacity>
           </View>
 
@@ -607,11 +468,7 @@ export default function GlobalPaywall() {
 
         {/* Top-right close button */}
         <TouchableOpacity style={styles.closeBtn} onPress={dismiss}>
-          <MaterialIcons
-            name="close"
-            size={20}
-            color={dark ? COLORS.textMuted : "#888"}
-          />
+          <MaterialIcons name="close" size={20} color={dark ? COLORS.textMuted : "#888"} />
         </TouchableOpacity>
       </Animated.View>
     </Modal>
@@ -677,21 +534,6 @@ const styles = StyleSheet.create({
   header: {
     alignItems: "center",
     paddingBottom: sp(2),
-  },
-  logoMark: {
-    width: 52,
-    height: 52,
-    borderRadius: 12,
-    alignItems: "center",
-    justifyContent: "center",
-    marginBottom: sp(1.5),
-    overflow: "hidden",
-  },
-  logoMarkText: {
-    fontFamily: "SpaceMono-Regular",
-    fontSize: 18,
-    fontWeight: "700",
-    letterSpacing: 2,
   },
   headline: {
     fontFamily: "SpaceMono-Regular",
@@ -821,6 +663,14 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     alignItems: "center",
     justifyContent: "center",
+  },
+
+  // ✅ Currency notice
+  currencyNote: {
+    fontSize: 10,
+    textAlign: "center",
+    marginTop: sp(1),
+    fontStyle: "italic",
   },
 
   // ── Features card ────────────────────────────────────────────
