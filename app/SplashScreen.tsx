@@ -20,8 +20,8 @@ export default function SplashScreen() {
           <Mic size={40} className="text-white" />
           <BookOpen size={40} className="text-white" />
         </div>
-        <h1 className="text-4xl font-bold text-white mb-2">LectureNote</h1>
-        <p className="text-teal-100 text-center">Your Smart Study Companion</p>
+        <h1 className="text-4xl font-bold text-white mb-2">Notetedd</h1>
+        <p className="text-teal-100 text-center">Learning Made Easier</p>
       </div>
     </div>
   );

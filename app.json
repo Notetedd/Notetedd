@@ -5,11 +5,29 @@
     "version": "1.1.0",
     "orientation": "portrait",
     "icon": "./public/notetedd-icon-1024.png",
-    "scheme": "notetedd",
+    "scheme": "com.notetedd.app",
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "autoVerify": true,
+          "data": [
+            {
+              "scheme": "com.notetedd.app",
+              "host": "oauth2redirect",
+              "pathPrefix": "/google"
+            }
+          ],
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ]
+        }
+      ],
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
       "infoPlist": {
+        "UIBackgroundModes": ["audio"],      
         "NSMicrophoneUsageDescription": "Notetedd needs microphone access to enable voice commands with Tedd, your AI study assistant.",
         "NSSpeechRecognitionUsageDescription": "Notetedd uses speech recognition to understand your voice commands.",
         "supportsTablet": true,
@@ -28,31 +46,30 @@
     "android": {
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./public/notetedd-playstore-icon-512x512.png"
+        "foregroundImage": "./public/notetedd-icon-light-512px.png"
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
       "permissions": [
         "android.permission.CAMERA",
         "android.permission.RECORD_AUDIO",
+         "RECORD_AUDIO",
+      "FOREGROUND_SERVICE",
+      "FOREGROUND_SERVICE_MICROPHONE",
         "android.permission.MODIFY_AUDIO_SETTINGS",
         "android.permission.INTERNET",
         "android.permission.RECEIVE_BOOT_COMPLETED",
         "android.permission.VIBRATE",
         "com.google.android.gms.permission.AD_ID",
-        "android.permission.CAMERA",
-        "android.permission.RECORD_AUDIO",
-        "android.permission.MODIFY_AUDIO_SETTINGS",
-        "android.permission.INTERNET",
-        "android.permission.RECEIVE_BOOT_COMPLETED",
-        "android.permission.VIBRATE",
-        "com.google.android.gms.permission.AD_ID"
+        "android.permission.CAMERA"
+        
+        
       ],
       "package": "com.notetedd.app"
     },
     "web": {
       "output": "static",
-      "favicon": "./public/icon.png",
+      "favicon": "./public/notetedd-icon-light-512px.png",
       "permissions": [
         "camera",
         "bluetooth"

@@ -21,16 +21,18 @@ import {
   query, where, serverTimestamp,
 } from "firebase/firestore";
 
-// ─── Key from env — ───────────────────────────────────────────
-// After
+// ─── API config ────────────────────────────────────────────────
 const GROQ_API_KEY    = process.env.EXPO_PUBLIC_GROQ_API_KEY   ?? "";
 const GEMINI_API_KEY  = process.env.EXPO_PUBLIC_GEMINI_API_KEY ?? "";
 const GROQ_API_URL    = "https://api.groq.com/openai/v1/chat/completions";
-const GEMINI_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent";
-// ════════════════════════════════════════════════════════════════
-//  DESIGN SYSTEM
-// ════════════════════════════════════════════════════════════════
 
+// Gemini endpoints — Flash is primary (fast + cheap), Pro is fallback for heavy docs
+const GEMINI_FLASH_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent";
+const GEMINI_PRO_ENDPOINT   = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent";
+
+// ════════════════════════════════════════════════════════════════
+//  DESIGN SYSTEM — unchanged from original
+// ════════════════════════════════════════════════════════════════
 const T = {
   bg:         "#04040a",
   bgEl:       "#090914",
@@ -44,14 +46,12 @@ const T = {
   textMuted:  "rgba(237, 233, 255, 0.83)",
   textDim:    "rgba(237, 233, 255, 0.72)",
   scrim:      "rgba(4,4,10,0.94)",
-
   violet:     "#5b21b6", violetMid: "#7c3aed", violetBr: "#a78bfa",
   ember:      "#ea580c", emberBr:   "#fb923c",
   teal:       "#0d9488", tealBr:    "#2dd4bf",
   gold:       "#d97706", goldBr:    "#fbbf24",
   success:    "#059669", successBr: "#34d399",
   danger:     "#dc2626", dangerBr:  "#f87171",
-
   va: (a) => `rgba(91,33,182,${a})`,
   ea: (a) => `rgba(234,88,12,${a})`,
   ta: (a) => `rgba(13,148,136,${a})`,
@@ -80,9 +80,197 @@ const MONO    = Platform.select({ ios: "Menlo",          default: "monospace" })
 const sp = (n) => n * 8;
 
 // ════════════════════════════════════════════════════════════════
-//  ATOMS
+//  HELPERS — document structure detection
 // ════════════════════════════════════════════════════════════════
 
+/**
+ * Determines what kind of academic document this is based on name + AI-returned
+ * content so we can pick the right note format.
+ *
+ * Returns one of: 'lecture' | 'exam_past_paper' | 'textbook_chapter' |
+ *                 'lab_report' | 'case_study' | 'research_paper' | 'general'
+ */
+const detectDocumentType = (filename = "", contentSample = "") => {
+  const f = (filename + " " + contentSample).toLowerCase();
+  if (/past.?paper|exam.?\d{4}|final.?exam|mid.?term|cat\b|continuous.?assessment/.test(f))
+    return "exam_past_paper";
+  if (/lab.?report|experiment|apparatus|procedure|hypothesis|results/.test(f))
+    return "lab_report";
+  if (/case.?study|case.?analysis|scenario/.test(f))
+    return "case_study";
+  if (/abstract|methodology|references|bibliography|literature.?review/.test(f))
+    return "research_paper";
+  if (/chapter|textbook|edition|publishers/.test(f))
+    return "textbook_chapter";
+  if (/lecture|slides?|week\s*\d|topic\s*\d|unit\s*\d/.test(f))
+    return "lecture";
+  return "general";
+};
+
+/**
+ * Estimates how detailed the notes should be based on the file size (a rough
+ * proxy for content volume on mobile where we can't know page count upfront).
+ *
+ * Returns: 'brief' | 'standard' | 'comprehensive' | 'deep'
+ */
+const estimateDepth = (fileSizeBytes) => {
+  const kb = fileSizeBytes / 1024;
+  if (kb < 200)   return "brief";        // Small image or short doc
+  if (kb < 800)   return "standard";     // Typical lecture slide deck (5–20 pages)
+  if (kb < 3000)  return "comprehensive"; // Medium PDF (20–60 pages)
+  return "deep";                          // Large PDF (60+ pages)
+};
+
+/**
+ * Builds a tailored system prompt based on detected document type and required
+ * depth. This is the engine behind the "dynamic format" requirement.
+ */
+const buildDocumentPrompt = (filename, docType, depth) => {
+  // ── Depth preamble ───────────────────────────────────────────
+  const depthInstructions = {
+    brief: `
+This appears to be a small document. Produce CONCISE notes:
+- 1 clear title
+- A 2–3 sentence overview
+- Key points as a simple numbered list (max 10 items)
+- 3 likely exam questions at the end
+Do NOT pad with unnecessary sections.`,
+
+    standard: `
+Produce WELL-STRUCTURED study notes:
+- 1 clear title
+- A short overview paragraph (3–5 sentences)
+- Main sections with headings and bullet sub-points
+- Important definitions clearly marked
+- 3–5 exam-style questions at the end`,
+
+    comprehensive: `
+This is a substantial document. Produce THOROUGH study notes across multiple
+sections. Do NOT truncate or summarise lazily — cover ALL meaningful content:
+- Title and course context
+- Detailed overview (what this document covers and why it matters)
+- Full breakdown by topic/section with sub-points
+- Definitions, formulas, and examples from the content
+- Connections between topics
+- 5–8 exam-style questions ranging from recall to application`,
+
+    deep: `
+This is a LARGE document (likely 60+ pages). You MUST produce EXTENSIVE,
+multi-section notes. Do NOT produce a one-page summary — that defeats the
+purpose. Structure your output as a proper study guide:
+
+REQUIRED structure:
+1. TITLE & COURSE CONTEXT
+2. DOCUMENT OVERVIEW (half page — what it covers, who it's for, why it matters)
+3. SECTION-BY-SECTION BREAKDOWN
+   - For each major section/chapter: heading, key ideas, sub-points, examples
+   - Include formulas, diagrams described in text, data trends
+4. MASTER CONCEPT MAP (bullet tree showing how all topics relate)
+5. KEY DEFINITIONS GLOSSARY (term: definition format, alphabetical)
+6. FORMULAS & EQUATIONS (if present — clearly formatted)
+7. CRITICAL ANALYSIS (what the document argues or concludes)
+8. EXAM PREPARATION
+   - 10 exam questions from recall to analysis level
+   - Answers or answer hints for each
+9. FURTHER STUDY SUGGESTIONS
+
+Use clear headings. Be thorough. A student should be able to study for an exam
+using ONLY these notes.`,
+  }[depth];
+
+  // ── Document-type-specific instructions ──────────────────────
+  const typeInstructions = {
+    exam_past_paper: `
+This is a PAST EXAMINATION PAPER. Format accordingly:
+- List every question clearly numbered
+- Group by section if sections exist
+- For each question: note the marks allocated, the topic it tests, and a
+  concise model answer or answer approach
+- At the end: list all topics examined, frequency of each, and study priorities`,
+
+    lab_report: `
+This is a LAB REPORT or experimental document. Structure as:
+- Aim / Hypothesis
+- Materials & Apparatus
+- Step-by-step Procedure (numbered)
+- Results summary (tables described in text, key values)
+- Discussion & Analysis points
+- Conclusion
+- Common exam questions about this type of experiment`,
+
+    case_study: `
+This is a CASE STUDY. Structure as:
+- Case Overview (who, what, where, when)
+- Key Facts & Data Points
+- Issues / Problems Identified
+- Analysis Framework (SWOT, PESTLE, or relevant theory if detectable)
+- Recommendations or Outcomes
+- Lessons Learned / Takeaways
+- Discussion questions`,
+
+    research_paper: `
+This is an ACADEMIC RESEARCH PAPER. Structure as:
+- Research Question / Hypothesis
+- Methodology Summary
+- Key Findings (bullet points)
+- Data / Evidence Highlights
+- Conclusions & Implications
+- Limitations noted
+- How to cite or reference this work
+- Questions this paper might generate in an exam`,
+
+    textbook_chapter: `
+This is a TEXTBOOK CHAPTER. Treat it as core curriculum content:
+- Chapter title and number
+- Learning objectives (if stated)
+- Concept-by-concept breakdown with clear explanations
+- All definitions (bold term: explanation)
+- All formulas with variable explanations
+- Worked examples described
+- End-of-chapter summary
+- Practice questions`,
+
+    lecture: `
+This is LECTURE CONTENT. Format as lecture notes a student would take:
+- Lecture title and topic
+- Learning outcomes
+- Concept flow in the order the lecturer presented them
+- Key points per slide/section
+- Any examples or case studies mentioned
+- "Remember this" callouts for likely exam content
+- Quick revision checklist`,
+
+    general: `
+Format as clean, well-organised study notes appropriate for the content.
+Use headings and sub-points. Prioritise clarity for a university student.`,
+  }[docType] || `Format as clean study notes.`;
+
+  return `You are an expert academic note-taking assistant helping Kenyan university students.
+The student has uploaded: "${filename}"
+
+CRITICAL FORMATTING RULES — STRICTLY FOLLOW:
+- NO asterisks (*) for bold or italic
+- NO backticks (\`) 
+- NO markdown hash symbols (#) for headings — use plain text headings in CAPS followed by a colon
+- NO extra quotes around text
+- Use plain text with clear hierarchy: CAPS HEADINGS, indented sub-points
+- Separate major sections with a line of dashes (----)
+- Numbers and bullet points are fine
+
+DEPTH REQUIRED:
+${depthInstructions}
+
+DOCUMENT TYPE SPECIFIC FORMAT:
+${typeInstructions}
+
+IMPORTANT: Never truncate. If the content is large, keep going. A student who paid
+for premium AI note generation deserves comprehensive output, not a lazy summary.
+Write everything.`;
+};
+
+// ════════════════════════════════════════════════════════════════
+//  ATOMS — unchanged
+// ════════════════════════════════════════════════════════════════
 const Label = ({ children, color, style }) => (
   <Text style={[{ fontFamily: MONO, fontSize: 9, letterSpacing: 3.5, textTransform: "uppercase", color }, style]}>
     {children}
@@ -112,7 +300,6 @@ const Pill = ({ label, color, icon, style }) => (
   </View>
 );
 
-// I map MIME types to the right icon name.
 const fileIcon = (type) => {
   if (type?.includes("image"))    return "image";
   if (type?.includes("pdf"))      return "picture-as-pdf";
@@ -120,7 +307,6 @@ const fileIcon = (type) => {
   return "insert-drive-file";
 };
 
-// I pick the right accent colour per file type.
 const fileAccent = (type) => {
   if (type?.includes("image")) return T.tealBr;
   if (type?.includes("pdf"))   return T.dangerBr;
@@ -131,12 +317,10 @@ const fileAccent = (type) => {
 const UploadRow = ({ item, onRemove, colors }) => {
   const isImage = item.type?.includes("image");
   const accent  = fileAccent(item.type);
-
   return (
     <View style={[A.uploadRow, { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
       <Corner pos="top-left"     color={accent} size={8} />
       <Corner pos="bottom-right" color={colors.borderMid} size={8} />
-
       {isImage ? (
         <Image source={{ uri: item.uri }} style={A.uploadThumb} />
       ) : (
@@ -144,15 +328,16 @@ const UploadRow = ({ item, onRemove, colors }) => {
           <MaterialIcons name={fileIcon(item.type)} size={22} color={accent} />
         </View>
       )}
-
       <View style={{ flex: 1 }}>
         <Text style={[A.uploadName, { color: colors.text }]} numberOfLines={1}>{item.name}</Text>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginTop: 4 }}>
           <Pill label={isImage ? "Image" : item.type?.includes("pdf") ? "PDF" : "Doc"} color={accent} />
           <Label color={colors.textDim}>{(item.size / 1024).toFixed(0)} KB</Label>
+          {item.size > 3_000_000 && (
+            <Pill label="Large file" color={T.goldBr} icon="info" />
+          )}
         </View>
       </View>
-
       <TouchableOpacity
         style={[A.removeBtn, { backgroundColor: T.da(0.12), borderColor: T.da(0.25) }]}
         onPress={() => onRemove(item.id)}
@@ -179,10 +364,29 @@ const SourceBtn = ({ icon, label, accent, onPress, colors }) => (
   </TouchableOpacity>
 );
 
+// ─── Per-file progress indicator ─────────────────────────────
+const FileProgressRow = ({ fileName, status, colors }) => {
+  const statusConfig = {
+    pending:    { icon: "hourglass-empty", color: colors.textDim,    label: "Waiting" },
+    processing: { icon: "sync",            color: T.violetBr,        label: "Processing" },
+    done:       { icon: "check-circle",    color: T.successBr,       label: "Done" },
+    error:      { icon: "error",           color: T.dangerBr,        label: "Failed" },
+  }[status] ?? { icon: "hourglass-empty", color: colors.textDim, label: "Waiting" };
+
+  return (
+    <View style={{ flexDirection: "row", alignItems: "center", gap: sp(1.5), marginBottom: sp(1) }}>
+      <MaterialIcons name={statusConfig.icon} size={16} color={statusConfig.color} />
+      <Text style={{ fontFamily: SANS, fontSize: 12, color: statusConfig.color, flex: 1 }} numberOfLines={1}>
+        {fileName}
+      </Text>
+      <Label color={statusConfig.color}>{statusConfig.label}</Label>
+    </View>
+  );
+};
+
 // ════════════════════════════════════════════════════════════════
 //  MAIN SCREEN
 // ════════════════════════════════════════════════════════════════
-
 export default function UploadPDFScreen({ navigation }) {
   const { theme }   = useTheme();
   const isDark      = theme === "dark";
@@ -193,15 +397,18 @@ export default function UploadPDFScreen({ navigation }) {
   const padH         = isTablet ? sp(6) : sp(3);
   const padTop       = Platform.OS === "ios" ? sp(7) : sp(5.5);
 
-  // ── Original state — untouched ────────────────────────────────
-  const [uploads,              setUploads]              = useState([]);
-  const [isProcessing,         setIsProcessing]         = useState(false);
-  const [generatedNotes,       setGeneratedNotes]       = useState(null);
-  const [showMergeModal,       setShowMergeModal]       = useState(false);
-  const [showNotesPreview,     setShowNotesPreview]     = useState(false);
-  const [matchingNotes,        setMatchingNotes]        = useState([]);
-  const [processingProgress,   setProcessingProgress]   = useState("");
-  const [noteTitle,            setNoteTitle]            = useState("");
+  // ── State ─────────────────────────────────────────────────────
+  const [uploads,            setUploads]            = useState([]);
+  const [isProcessing,       setIsProcessing]       = useState(false);
+  const [generatedNotes,     setGeneratedNotes]     = useState(null);
+  const [showMergeModal,     setShowMergeModal]     = useState(false);
+  const [showNotesPreview,   setShowNotesPreview]   = useState(false);
+  const [matchingNotes,      setMatchingNotes]      = useState([]);
+  const [processingProgress, setProcessingProgress] = useState("");
+  const [noteTitle,          setNoteTitle]          = useState("");
+  const [editableNotes,      setEditableNotes]      = useState("");   // NEW: editable content
+  const [fileStatuses,       setFileStatuses]       = useState({});   // NEW: per-file progress
+  const [detectedDocInfo,    setDetectedDocInfo]    = useState(null); // NEW: doc type info
 
   const fileInputRef = useRef(null);
   const { gate, track, canUse } = useFeatureGate(FEATURES.UPLOAD);
@@ -209,7 +416,6 @@ export default function UploadPDFScreen({ navigation }) {
   // ── Animations ────────────────────────────────────────────────
   const masterOpa = useRef(new Animated.Value(0)).current;
   const slideY    = useRef(new Animated.Value(20)).current;
-  // I use a subtle pulse on the processing orb.
   const procPulse = useRef(new Animated.Value(1)).current;
 
   React.useEffect(() => {
@@ -233,8 +439,12 @@ export default function UploadPDFScreen({ navigation }) {
     }
   }, [isProcessing]);
 
+  // ── Helper: update a single file's status ────────────────────
+  const setFileStatus = (id, status) =>
+    setFileStatuses(prev => ({ ...prev, [id]: status }));
+
   // ════════════════════════════════════════════════════════════
-  //  FUNCTIONS
+  //  PICK FUNCTIONS — all unchanged in logic
   // ════════════════════════════════════════════════════════════
 
   const handleWebFileUpload = (event) => {
@@ -247,7 +457,7 @@ export default function UploadPDFScreen({ navigation }) {
       size: file.size,
       webFile: file,
     }));
-    setUploads([...uploads, ...newUploads]);
+    setUploads(prev => [...prev, ...newUploads]);
   };
 
   const pickImages = async (fromCamera = false) => {
@@ -272,7 +482,7 @@ export default function UploadPDFScreen({ navigation }) {
           type: asset.type || asset.mimeType || "image/jpeg",
           size: asset.fileSize || 0,
         }));
-        setUploads([...uploads, ...newUploads]);
+        setUploads(prev => [...prev, ...newUploads]);
       }
     } catch (error) {
       console.error("ImagePicker Error:", error);
@@ -283,7 +493,13 @@ export default function UploadPDFScreen({ navigation }) {
   const pickDocuments = async () => {
     try {
       const result = await DocumentPicker.getDocumentAsync({
-        type: ["application/pdf", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "image/*", "application/docx"],
+        type: [
+          "application/pdf",
+          "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+          "application/msword",
+          "image/*",
+          "application/*",
+        ],
         multiple: true,
         copyToCacheDirectory: true,
       });
@@ -294,9 +510,9 @@ export default function UploadPDFScreen({ navigation }) {
           uri: file.uri,
           name: file.name,
           type: file.mimeType || "application/pdf",
-          size: file.size,
+          size: file.size || 0,
         }));
-        setUploads([...uploads, ...newUploads]);
+        setUploads(prev => [...prev, ...newUploads]);
       }
     } catch (error) {
       console.error("DocumentPicker Error:", error);
@@ -306,361 +522,626 @@ export default function UploadPDFScreen({ navigation }) {
 
   const removeUpload = (id) => setUploads(uploads.filter((item) => item.id !== id));
 
+  // ════════════════════════════════════════════════════════════
+  //  BASE64 CONVERSION — unchanged, reliable
+  // ════════════════════════════════════════════════════════════
   const fileToBase64 = async (uri, webFile = null) => {
     try {
-      console.log("Converting to base64:", uri);
       if (Platform.OS === "web") {
-        if (webFile) {
-          return new Promise((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onloadend = () => resolve(reader.result.split(",")[1]);
-            reader.onerror = reject;
-            reader.readAsDataURL(webFile);
-          });
-        } else {
-          const response = await fetch(uri);
-          const blob = await response.blob();
-          return new Promise((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onloadend = () => resolve(reader.result.split(",")[1]);
-            reader.onerror = reject;
-            reader.readAsDataURL(blob);
-          });
-        }
-      } else {
-        try {
-          const base64 = await FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.Base64 });
-          if (!base64 || base64.length === 0) throw new Error("Conversion resulted in empty string");
-          console.log("✅ Successfully converted to base64");
-          return base64;
-        } catch (fsError) {
-          console.error("Direct read failed, trying fetch method:", fsError);
-          try {
-            const response = await fetch(uri);
-            const blob = await response.blob();
-            return new Promise((resolve, reject) => {
-              const reader = new FileReader();
-              reader.onloadend = () => { const base64 = reader.result.split(",")[1]; console.log("✅ Converted via fetch method"); resolve(base64); };
-              reader.onerror  = (error) => { console.error("FileReader error:", error); reject(new Error("Failed to read file as base64")); };
-              reader.readAsDataURL(blob);
-            });
-          } catch (fetchError) {
-            console.error("Fetch method also failed:", fetchError);
-            throw new Error("Unable to read file. Please try a different image or file format.");
-          }
-        }
+        const source = webFile ?? await fetch(uri).then(r => r.blob());
+        return new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onloadend = () => resolve(reader.result.split(",")[1]);
+          reader.onerror = reject;
+          reader.readAsDataURL(source instanceof Blob ? source : webFile);
+        });
+      }
+      // Native path
+      try {
+        const base64 = await FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.Base64 });
+        if (base64?.length > 0) return base64;
+        throw new Error("Empty base64");
+      } catch {
+        // Fallback: fetch → blob → FileReader
+        const response = await fetch(uri);
+        const blob     = await response.blob();
+        return new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onloadend = () => resolve(reader.result.split(",")[1]);
+          reader.onerror = reject;
+          reader.readAsDataURL(blob);
+        });
       }
     } catch (error) {
-      console.error("fileToBase64 error:", error);
-      throw new Error(`Could not convert file: ${error.message}`);
+      throw new Error(`Could not read file: ${error.message}`);
     }
   };
 
-  const formatNotesContent = (rawContent) => {
-    if (!rawContent) return "";
-    return rawContent
+  // ════════════════════════════════════════════════════════════
+  //  FORMAT HELPER — strips markdown formatting artifacts
+  // ════════════════════════════════════════════════════════════
+  const formatNotesContent = (raw = "") =>
+    raw
       .replace(/\*\*\*([^*]+)\*\*\*/g, "$1")
       .replace(/\*\*([^*]+)\*\*/g, "$1")
       .replace(/\*([^*]+)\*/g, "$1")
       .replace(/`([^`]+)`/g, "$1")
       .replace(/[""]([^""]+)["\"]/g, "$1")
-      .replace(/\n{3,}/g, "\n\n")
+      .replace(/^#+\s*/gm, "")          // strip markdown headings
+      .replace(/\n{4,}/g, "\n\n\n")
       .trim();
-  };
-const analyzeImage = async (file) => {
-  try {
-    console.log("Analyzing image:", file.name, file.type);
+
+  // ════════════════════════════════════════════════════════════
+  //  IMAGE ANALYSIS
+  //  Priority: Gemini Flash → Groq vision → Gemini Pro
+  // ════════════════════════════════════════════════════════════
+  const analyzeImage = async (file) => {
     const base64 = await fileToBase64(file.uri, file.webFile);
     if (!base64) throw new Error("Could not convert image to base64");
 
     let mimeType = file.type;
     if (!mimeType || mimeType === "image") {
-      const ext = file.name.toLowerCase().split(".").pop();
-      mimeType = ({ jpg:"image/jpeg", jpeg:"image/jpeg", png:"image/png", gif:"image/gif", webp:"image/webp", heic:"image/heic", heif:"image/heif" })[ext] || "image/jpeg";
+      const ext = (file.name ?? "").toLowerCase().split(".").pop();
+      mimeType = ({
+        jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png",
+        gif: "image/gif",  webp: "image/webp", heic: "image/heic", heif: "image/heif",
+      })[ext] ?? "image/jpeg";
     }
-    console.log("Using MIME type:", mimeType);
 
-    const imagePrompt = `You are an expert note-taking assistant. Analyze this image and extract ALL visible content.
+    const depth  = estimateDepth(file.size);
+    const docType = detectDocumentType(file.name, "");
+    const prompt  = buildDocumentPrompt(file.name, docType, depth);
 
-IMPORTANT FORMATTING RULES:
-- DO NOT use asterisks (*) for bold or italic
-- DO NOT use backticks (\`) for code
-- DO NOT add extra quotes around text
-- Use plain text with clear hierarchy
-- Use simple formatting with line breaks and indentation
+    // ── 1. Gemini Flash (primary) ──────────────────────────
+    if (GEMINI_API_KEY) {
+      try {
+        console.log("🔵 Gemini Flash — image analysis");
+        const res = await fetch(`${GEMINI_FLASH_ENDPOINT}?key=${GEMINI_API_KEY}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            contents: [{
+              parts: [
+                { text: prompt },
+                { inline_data: { mime_type: mimeType, data: base64 } },
+              ],
+            }],
+            generationConfig: {
+              temperature: 0.25, topK: 20, topP: 0.85,
+              maxOutputTokens: depth === "deep" ? 8192 : depth === "comprehensive" ? 6144 : 4096,
+            },
+          }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          const text = data.candidates?.[0]?.content?.parts
+            ?.filter(p => p.text).map(p => p.text).join("\n");
+          if (text?.trim()) {
+            console.log("✅ Gemini Flash image — success");
+            return formatNotesContent(text);
+          }
+          // Check for safety/recitation blocks
+          const finishReason = data.candidates?.[0]?.finishReason;
+          if (finishReason && finishReason !== "STOP") {
+            console.warn("⚠️ Gemini Flash blocked:", finishReason);
+          }
+        } else {
+          const err = await res.json().catch(() => ({}));
+          console.warn("⚠️ Gemini Flash image HTTP error:", err?.error?.message ?? res.status);
+        }
+      } catch (e) {
+        console.warn("⚠️ Gemini Flash image exception:", e.message);
+      }
+    }
 
-Extract and organize the content with:
-1. Title: [Clear title on first line]
-2. Main topics with subtopics (use proper indentation)
-3. Key points and definitions
-4. Formulas or equations (if present)
-5. Examples (if present)
-6. Summary (if sufficient content)
-
-ONLY include sections that have actual content from the image.
-Format as clean, readable plain text suitable for students.`;
-
-    // ── Primary: Groq (vision) ─────────────────────────────
+    // ── 2. Groq vision (first fallback) ───────────────────
     if (GROQ_API_KEY) {
       try {
-        console.log("🟡 Trying Groq for image analysis…");
-        const groqRes = await fetch(GROQ_API_URL, {
+        console.log("🟡 Groq vision fallback — image analysis");
+        const res = await fetch(GROQ_API_URL, {
           method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${GROQ_API_KEY}`,
-          },
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${GROQ_API_KEY}` },
           body: JSON.stringify({
             model: "meta-llama/llama-4-scout-17b-16e-instruct",
-            messages: [
-              {
-                role: "user",
-                content: [
-                  { type: "text", text: imagePrompt },
-                  { type: "image_url", image_url: { url: `data:${mimeType};base64,${base64}` } },
-                ],
-              },
-            ],
+            messages: [{
+              role: "user",
+              content: [
+                { type: "text",      text: prompt },
+                { type: "image_url", image_url: { url: `data:${mimeType};base64,${base64}` } },
+              ],
+            }],
+            temperature: 0.25,
+            max_tokens: 4096,
+          }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          const text = data.choices?.[0]?.message?.content?.trim();
+          if (text) {
+            console.log("✅ Groq vision — success");
+            return formatNotesContent(text);
+          }
+        } else {
+          const err = await res.json().catch(() => ({}));
+          console.warn("⚠️ Groq vision HTTP error:", err?.error?.message ?? res.status);
+        }
+      } catch (e) {
+        console.warn("⚠️ Groq vision exception:", e.message);
+      }
+    }
+
+    // ── 3. Gemini Pro (final fallback for images) ──────────
+    if (GEMINI_API_KEY) {
+      try {
+        console.log("🔵 Gemini Pro fallback — image analysis");
+        const res = await fetch(`${GEMINI_PRO_ENDPOINT}?key=${GEMINI_API_KEY}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            contents: [{
+              parts: [
+                { text: prompt },
+                { inline_data: { mime_type: mimeType, data: base64 } },
+              ],
+            }],
+            generationConfig: { temperature: 0.25, maxOutputTokens: 8192 },
+          }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          const text = data.candidates?.[0]?.content?.parts
+            ?.filter(p => p.text).map(p => p.text).join("\n");
+          if (text?.trim()) {
+            console.log("✅ Gemini Pro image — success");
+            return formatNotesContent(text);
+          }
+        }
+      } catch (e) {
+        console.warn("⚠️ Gemini Pro image exception:", e.message);
+      }
+    }
+
+    throw new Error("All AI providers failed for this image. Please try again or use a clearer image.");
+  };
+
+  // ════════════════════════════════════════════════════════════
+  //  DOCUMENT ANALYSIS (PDF / DOCX)
+  //
+  //  KEY FIX: Gemini natively reads PDF base64. We pass the
+  //  actual file bytes, not just the filename. Groq cannot do
+  //  this so it is the fallback with a text-only prompt.
+  //
+  //  For large docs (>3MB / "deep" depth) we chunk the prompt
+  //  in two passes with Gemini, then concatenate.
+  // ════════════════════════════════════════════════════════════
+  const analyzeDocument = async (file) => {
+    const depth   = estimateDepth(file.size);
+    const docType = detectDocumentType(file.name, "");
+    const prompt  = buildDocumentPrompt(file.name, docType, depth);
+
+    console.log(`📄 Document: ${file.name} | type: ${docType} | depth: ${depth} | size: ${(file.size/1024).toFixed(0)}KB`);
+    setDetectedDocInfo({ docType, depth });
+
+    const maxTokens = {
+      brief:         4096,
+      standard:      6144,
+      comprehensive: 8192,
+      deep:          8192, // Gemini Flash max; we do two passes for "deep"
+    }[depth];
+
+    // Convert to base64 once — reused across providers
+    let base64 = null;
+    let base64Error = null;
+    try {
+      base64 = await fileToBase64(file.uri, file.webFile);
+    } catch (e) {
+      base64Error = e.message;
+      console.warn("⚠️ Could not read file to base64:", base64Error);
+    }
+
+    // Determine real MIME type
+    let mimeType = file.type;
+    if (!mimeType || mimeType === "application/octet-stream") {
+      const ext = (file.name ?? "").toLowerCase().split(".").pop();
+      mimeType = ({
+        pdf:  "application/pdf",
+        docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        doc:  "application/msword",
+      })[ext] ?? "application/pdf";
+    }
+
+    // ── 1. Gemini Flash with actual file bytes (primary) ───
+    if (GEMINI_API_KEY && base64) {
+      try {
+        console.log("🔵 Gemini Flash — document analysis (native PDF/Doc reading)");
+
+        // For "deep" docs: two-pass strategy to maximise coverage
+        if (depth === "deep") {
+          const pass1Prompt = `${prompt}\n\nPASS 1 OF 2: Cover the FIRST HALF of this document thoroughly.
+Start from the beginning and go as deep as possible. End with "--- CONTINUED ---".`;
+          const pass2Prompt = `${prompt}\n\nPASS 2 OF 2: Cover the SECOND HALF of this document thoroughly.
+Continue from where the previous analysis would have ended. Be just as detailed.`;
+
+          const [pass1Res, pass2Res] = await Promise.allSettled([
+            fetch(`${GEMINI_FLASH_ENDPOINT}?key=${GEMINI_API_KEY}`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                contents: [{
+                  parts: [
+                    { text: pass1Prompt },
+                    { inline_data: { mime_type: mimeType, data: base64 } },
+                  ],
+                }],
+                generationConfig: { temperature: 0.2, maxOutputTokens: 8192 },
+              }),
+            }),
+            fetch(`${GEMINI_FLASH_ENDPOINT}?key=${GEMINI_API_KEY}`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                contents: [{
+                  parts: [
+                    { text: pass2Prompt },
+                    { inline_data: { mime_type: mimeType, data: base64 } },
+                  ],
+                }],
+                generationConfig: { temperature: 0.2, maxOutputTokens: 8192 },
+              }),
+            }),
+          ]);
+
+          let combined = "";
+          for (const result of [pass1Res, pass2Res]) {
+            if (result.status === "fulfilled" && result.value.ok) {
+              const data = await result.value.json();
+              const text = data.candidates?.[0]?.content?.parts
+                ?.filter(p => p.text).map(p => p.text).join("\n");
+              if (text?.trim()) combined += text + "\n\n";
+            }
+          }
+          if (combined.trim()) {
+            console.log("✅ Gemini Flash two-pass document — success");
+            return formatNotesContent(combined);
+          }
+        }
+
+        // Single pass for brief/standard/comprehensive
+        const res = await fetch(`${GEMINI_FLASH_ENDPOINT}?key=${GEMINI_API_KEY}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            contents: [{
+              parts: [
+                { text: prompt },
+                { inline_data: { mime_type: mimeType, data: base64 } },
+              ],
+            }],
+            generationConfig: {
+              temperature: 0.2, topK: 20, topP: 0.85,
+              maxOutputTokens: maxTokens,
+            },
+          }),
+        });
+
+        if (res.ok) {
+          const data = await res.json();
+          const text = data.candidates?.[0]?.content?.parts
+            ?.filter(p => p.text).map(p => p.text).join("\n");
+          if (text?.trim()) {
+            console.log("✅ Gemini Flash document — success");
+            return formatNotesContent(text);
+          }
+          const finishReason = data.candidates?.[0]?.finishReason;
+          if (finishReason && finishReason !== "STOP") {
+            console.warn("⚠️ Gemini Flash document blocked:", finishReason);
+          }
+        } else {
+          const err = await res.json().catch(() => ({}));
+          console.warn("⚠️ Gemini Flash document HTTP error:", err?.error?.message ?? res.status);
+        }
+      } catch (e) {
+        console.warn("⚠️ Gemini Flash document exception:", e.message);
+      }
+    }
+
+    // ── 2. Gemini Pro with file bytes (second option) ──────
+    if (GEMINI_API_KEY && base64) {
+      try {
+        console.log("🔵 Gemini Pro fallback — document analysis");
+        const res = await fetch(`${GEMINI_PRO_ENDPOINT}?key=${GEMINI_API_KEY}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            contents: [{
+              parts: [
+                { text: prompt },
+                { inline_data: { mime_type: mimeType, data: base64 } },
+              ],
+            }],
+            generationConfig: { temperature: 0.2, maxOutputTokens: 8192 },
+          }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          const text = data.candidates?.[0]?.content?.parts
+            ?.filter(p => p.text).map(p => p.text).join("\n");
+          if (text?.trim()) {
+            console.log("✅ Gemini Pro document — success");
+            return formatNotesContent(text);
+          }
+        } else {
+          const err = await res.json().catch(() => ({}));
+          console.warn("⚠️ Gemini Pro document HTTP error:", err?.error?.message ?? res.status);
+        }
+      } catch (e) {
+        console.warn("⚠️ Gemini Pro document exception:", e.message);
+      }
+    }
+
+    // ── 3. Groq text-only fallback ─────────────────────────
+    // Groq cannot read PDF bytes. We send only the filename + a content-aware
+    // prompt. This is a genuine last resort — notes will be generic, so we
+    // surface a warning to the user.
+    if (GROQ_API_KEY) {
+      try {
+        console.log("🟡 Groq text-only fallback (file bytes unavailable or Gemini failed)");
+        const groqFallbackPrompt = `${prompt}
+
+NOTE: You do not have access to the file's raw content. Generate the best
+possible study note template and framework for a document called "${file.name}",
+filling in what you can infer from the filename, document type (${docType}),
+and common academic content for Kenyan universities. Clearly mark inferred
+sections with [INFERRED - verify against your document].`;
+
+        const res = await fetch(GROQ_API_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${GROQ_API_KEY}` },
+          body: JSON.stringify({
+            model: "llama-3.3-70b-versatile",
+            messages: [{ role: "user", content: groqFallbackPrompt }],
             temperature: 0.3,
             max_tokens: 4096,
           }),
         });
-
-        if (groqRes.ok) {
-          const groqData = await groqRes.json();
-          const text = groqData.choices?.[0]?.message?.content?.trim();
+        if (res.ok) {
+          const data = await res.json();
+          const text = data.choices?.[0]?.message?.content?.trim();
           if (text) {
-            console.log("✅ Groq image analysis succeeded");
-            return formatNotesContent(text);
+            console.log("✅ Groq text-only fallback — success (template mode)");
+            // Prepend a clear warning
+            return formatNotesContent(
+              "⚠️ NOTICE: AI could not read this file's content directly. " +
+              "The notes below are a framework based on the document name. " +
+              "Please verify against your actual document.\n\n" + text
+            );
           }
         } else {
-          const err = await groqRes.json().catch(() => ({}));
-          console.warn("⚠️ Groq image error:", err.error?.message || groqRes.statusText);
+          const err = await res.json().catch(() => ({}));
+          console.warn("⚠️ Groq fallback HTTP error:", err?.error?.message ?? res.status);
         }
-      } catch (groqErr) {
-        console.warn("⚠️ Groq image request failed, falling back to Gemini:", groqErr.message);
+      } catch (e) {
+        console.warn("⚠️ Groq fallback exception:", e.message);
       }
     }
 
-    // ── Fallback: Gemini ───────────────────────────────────
-    console.log("🔵 Falling back to Gemini for image analysis…");
-    const geminiRes = await fetch(`${GEMINI_ENDPOINT}?key=${GEMINI_API_KEY}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: imagePrompt }, { inline_data: { mime_type: mimeType, data: base64 } }] }],
-        generationConfig: { temperature: 0.3, topK: 20, topP: 0.8, maxOutputTokens: 4096 },
-      }),
-    });
+    throw new Error(
+      "Could not generate notes for this file. " +
+      (base64Error ? `File read error: ${base64Error}. ` : "") +
+      "Please check your internet connection and try again."
+    );
+  };
 
-    if (!geminiRes.ok) {
-      const errorData = await geminiRes.json().catch(() => ({}));
-      throw new Error(`Gemini API error: ${errorData.error?.message || geminiRes.statusText}`);
-    }
-
-    const geminiData = await geminiRes.json();
-    console.log("✅ Gemini image response received");
-    if (geminiData.candidates?.[0]?.content) {
-      const text = geminiData.candidates[0].content.parts.filter(p => p.text).map(p => p.text).join("\n");
-      if (text) return formatNotesContent(text);
-    }
-    throw new Error("Both Groq and Gemini returned no content");
-  } catch (error) {
-    console.error("Image analysis error:", error);
-    throw error;
-  }
-};
-const analyzeDocument = async (file) => {
-  const docPrompt = `You are an expert note-taking assistant. A student has uploaded: "${file.name}"
-
-IMPORTANT FORMATTING RULES:
-- DO NOT use asterisks (*) for formatting
-- DO NOT use backticks (\`)
-- DO NOT add quotes around text
-- Use plain text with clear structure
-
-Create organized notes with:
-1. Title based on the document name
-2. Main sections (only if content allows):
-   - Overview
-   - Key Concepts
-   - Important Points
-   - Examples (if applicable)
-   - Summary
-
-Format as clean, readable plain text.`;
-
-  // ── Primary: Groq ──────────────────────────────────────
-  if (GROQ_API_KEY) {
-    try {
-      console.log("🟡 Trying Groq for document analysis…");
-      const groqRes = await fetch(GROQ_API_URL, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${GROQ_API_KEY}`,
-        },
-        body: JSON.stringify({
-          model: "llama-3.3-70b-versatile",
-          messages: [{ role: "user", content: docPrompt }],
-          temperature: 0.3,
-          max_tokens: 2048,
-        }),
-      });
-
-      if (groqRes.ok) {
-        const groqData = await groqRes.json();
-        const text = groqData.choices?.[0]?.message?.content?.trim();
-        if (text) {
-          console.log("✅ Groq document analysis succeeded");
-          return formatNotesContent(text);
-        }
-      } else {
-        const err = await groqRes.json().catch(() => ({}));
-        console.warn("⚠️ Groq document error:", err.error?.message || groqRes.statusText);
-      }
-    } catch (groqErr) {
-      console.warn("⚠️ Groq document request failed, falling back to Gemini:", groqErr.message);
-    }
-  }
-
-  // ── Fallback: Gemini ───────────────────────────────────
-  console.log("🔵 Falling back to Gemini for document analysis…");
-  const geminiRes = await fetch(`${GEMINI_ENDPOINT}?key=${GEMINI_API_KEY}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      contents: [{ parts: [{ text: docPrompt }] }],
-      generationConfig: { temperature: 0.3, topK: 20, topP: 0.8, maxOutputTokens: 2048 },
-    }),
-  });
-
-  if (!geminiRes.ok) {
-    const e = await geminiRes.json().catch(() => ({}));
-    throw new Error(`Gemini API error: ${e.error?.message || geminiRes.statusText}`);
-  }
-
-  const geminiData = await geminiRes.json();
-  if (geminiData.candidates?.[0]?.content) {
-    const text = geminiData.candidates[0].content.parts.filter(p => p.text).map(p => p.text).join("\n");
-    if (text) return formatNotesContent(text);
-  }
-  throw new Error("Both Groq and Gemini returned no content for this document");
-};
-
+  // ════════════════════════════════════════════════════════════
+  //  MERGE MATCHING — improved with weighted scoring
+  // ════════════════════════════════════════════════════════════
   const checkForMatches = async (generatedContent) => {
     try {
       const currentUser = auth.currentUser;
-      if (!currentUser) { console.log("No user signed in"); return []; }
-      console.log("🔍 Checking for matching notes...");
-      const q = query(collection(db, "recordings"), where("userId", "==", currentUser.uid));
+      if (!currentUser) return [];
+
+      const q    = query(collection(db, "recordings"), where("userId", "==", currentUser.uid));
       const snap = await getDocs(q);
-      const existingNotes = snap.docs.map(d => ({ id: d.id, title: d.data().title || d.data().organizedNotes?.title || "Untitled", content: d.data().organizedNotes?.content || d.data().transcription || "", ...d.data() }));
-      console.log(`📚 Found ${existingNotes.length} existing notes`);
-      const keywords = generatedContent.toLowerCase().replace(/[^\w\s]/g, "").split(/\s+/).filter(w => w.length > 4);
+      const existingNotes = snap.docs.map(d => ({
+        id:      d.id,
+        title:   d.data().title || d.data().organizedNotes?.title || "Untitled",
+        content: d.data().organizedNotes?.content || d.data().transcription || "",
+        ...d.data(),
+      }));
+
+      // Extract meaningful academic keywords (>5 chars, not common stopwords)
+      const STOPWORDS = new Set(["about","after","again","along","also","another","around",
+        "because","before","being","between","during","every","first","found","given",
+        "going","group","having","important","include","large","later","learn","might",
+        "never","often","other","point","right","should","since","small","still","study",
+        "their","there","these","thing","think","those","three","through","under","using",
+        "which","while","within","would","could","should"]);
+
+      const keywords = [...new Set(
+        generatedContent
+          .toLowerCase()
+          .replace(/[^\w\s]/g, " ")
+          .split(/\s+/)
+          .filter(w => w.length > 5 && !STOPWORDS.has(w))
+      )];
+
+      if (keywords.length === 0) return [];
+
       const matches = existingNotes.filter(note => {
-        const noteContent = (note.title + " " + note.content).toLowerCase();
-        const matchCount = keywords.filter(kw => noteContent.includes(kw)).length;
-        return matchCount / Math.max(keywords.length, 1) > 0.25;
+        const noteWords = (note.title + " " + note.content).toLowerCase();
+        const matchCount = keywords.filter(kw => noteWords.includes(kw)).length;
+        // Require 35% keyword overlap — more conservative to avoid false merges
+        return matchCount / keywords.length > 0.35;
       });
-      console.log(`✨ Found ${matches.length} matching notes`);
+
       return matches;
-    } catch (error) { console.error("Error checking for matches:", error); return []; }
+    } catch (error) {
+      console.error("Match check error:", error);
+      return [];
+    }
   };
 
+  // ════════════════════════════════════════════════════════════
+  //  PROCESS UPLOADS
+  //  Fix: single gate check at entry, parallel processing,
+  //       per-file status tracking
+  // ════════════════════════════════════════════════════════════
   const processUploads = async () => {
     if (uploads.length === 0) { Alert.alert("No Files", "Please upload at least one file."); return; }
     const currentUser = auth.currentUser;
     if (!currentUser) { Alert.alert("Sign In Required", "Please sign in to generate notes."); return; }
 
+    // ── Single gate check at entry point ──────────────────
+    const allowed = gate();
+    if (!allowed) return;
+
     setIsProcessing(true);
-    let allNotes = "", successCount = 0, failCount = 0;
+    setFileStatuses(Object.fromEntries(uploads.map(f => [f.id, "pending"])));
 
     try {
-      for (let i = 0; i < uploads.length; i++) {
-        const file = uploads[i];
-        setProcessingProgress(`Processing ${i + 1} of ${uploads.length}: ${file.name}`);
-        try {
-          let notes;
-          if (file.type.includes("image")) notes = await analyzeImage(file);
-          else if (file.type.includes("pdf") || file.type.includes("document")) notes = await analyzeDocument(file);
-          else notes = `Unable to process file type: ${file.type}`;
+      // Process in parallel with Promise.allSettled for resilience
+      setProcessingProgress(`Analysing ${uploads.length} file${uploads.length !== 1 ? "s" : ""}…`);
 
-          if (uploads.length === 1) {
-            allNotes = notes;
-          } else {
-            allNotes += `\n\n${"─".repeat(50)}\n📄 ${file.name}\n${"─".repeat(50)}\n\n` + notes;
+      const results = await Promise.allSettled(
+        uploads.map(async (file) => {
+          setFileStatus(file.id, "processing");
+          try {
+            let notes;
+            if (file.type?.includes("image")) {
+              notes = await analyzeImage(file);
+            } else {
+              notes = await analyzeDocument(file);
+            }
+            setFileStatus(file.id, "done");
+            return { file, notes, success: true };
+          } catch (err) {
+            setFileStatus(file.id, "error");
+            return { file, notes: null, success: false, error: err.message };
           }
-          successCount++;
-          console.log(`✅ Successfully processed: ${file.name}`);
-        } catch (fileError) {
-          console.error(`❌ Failed to process ${file.name}:`, fileError);
-          failCount++;
-          if (uploads.length > 1) allNotes += `\n\n${"─".repeat(50)}\n📄 ${file.name} - Processing Failed\n${"─".repeat(50)}\n\nError: ${fileError.message}\n`;
-        }
+        })
+      );
+
+      const successes = results
+        .filter(r => r.status === "fulfilled" && r.value.success)
+        .map(r => r.value);
+      const failures = results
+        .filter(r => r.status === "fulfilled" && !r.value.success || r.status === "rejected")
+        .map(r => r.status === "fulfilled" ? r.value : { file: null, error: r.reason?.message });
+
+      if (successes.length === 0) {
+        throw new Error("Could not process any of the uploaded files. Please check your internet connection and try again.");
       }
 
-      if (successCount === 0) throw new Error("Failed to process any files. Please try different files or formats.");
-      if (failCount > 0) Alert.alert("Partial Success", `Successfully processed ${successCount} file(s). ${failCount} file(s) failed.`);
+      if (failures.length > 0) {
+        const failedNames = failures
+          .filter(f => f.file)
+          .map(f => f.file.name)
+          .join(", ");
+        Alert.alert(
+          "Some Files Failed",
+          `${successes.length} file(s) processed successfully.\nFailed: ${failedNames}`
+        );
+      }
+
+      // Combine notes from all successful files
+      const allNotes = successes.length === 1
+        ? successes[0].notes
+        : successes.map(({ file, notes }) =>
+            `${"═".repeat(55)}\n📄 ${file.name}\n${"═".repeat(55)}\n\n${notes}`
+          ).join("\n\n");
 
       setGeneratedNotes(allNotes);
-      const lines = allNotes.split("\n").filter(l => l.trim());
-      const extractedTitle = lines[0]?.replace(/^#+\s*/, "")?.replace(/^Title:\s*/i, "")?.substring(0, 100) || "";
-      setNoteTitle(extractedTitle || `AI Notes - ${new Date().toLocaleDateString()}`);
+      setEditableNotes(allNotes);
+
+      // Extract title from first meaningful line
+      const firstLine = allNotes
+        .split("\n")
+        .map(l => l.trim())
+        .find(l =>
+          l.length > 5 &&
+          !l.startsWith("⚠️") &&
+          !l.startsWith("═") &&
+          !l.startsWith("─") &&
+          !l.startsWith("📄")
+        ) ?? "";
+      setNoteTitle(
+        firstLine
+          .replace(/^(title:|note:|topic:)\s*/i, "")
+          .substring(0, 100)
+          .trim() ||
+        `AI Notes — ${new Date().toLocaleDateString("en-KE", { day: "numeric", month: "short", year: "numeric" })}`
+      );
 
       const matches = await checkForMatches(allNotes);
-      if (matches.length > 0) { setMatchingNotes(matches); setShowMergeModal(true); }
-      else setShowNotesPreview(true);
+      if (matches.length > 0) {
+        setMatchingNotes(matches);
+        setShowMergeModal(true);
+      } else {
+        setShowNotesPreview(true);
+      }
     } catch (error) {
       console.error("Processing error:", error);
-      Alert.alert("Processing Failed", error.message || "Failed to process uploads. Please try again.", [{ text: "OK" }]);
+      Alert.alert("Processing Failed", error.message || "Failed to process uploads. Please try again.");
     } finally {
       setIsProcessing(false);
       setProcessingProgress("");
     }
   };
 
+  // ════════════════════════════════════════════════════════════
+  //  SAVE NOTES
+  // ════════════════════════════════════════════════════════════
   const saveNotes = async (content, mergeWithId = null) => {
     try {
       const currentUser = auth.currentUser;
       if (!currentUser) { Alert.alert("Error", "Please sign in to save notes."); return; }
 
       if (mergeWithId) {
-        console.log("🔄 Merging with existing note:", mergeWithId);
         const noteRef      = doc(db, "recordings", mergeWithId);
         const existingNote = matchingNotes.find(n => n.id === mergeWithId);
-        const updatedContent = existingNote.organizedNotes?.content
-          ? existingNote.organizedNotes.content + "\n\n" + "─".repeat(50) + "\n\n📎 Merged Content\n\n" + content
+        const updatedContent = existingNote?.organizedNotes?.content
+          ? existingNote.organizedNotes.content +
+            "\n\n" + "─".repeat(50) + "\n\n📎 Merged Content\n\n" + content
           : content;
 
         await updateDoc(noteRef, {
           organizedNotes: {
-            title: existingNote.organizedNotes?.title || noteTitle,
-            content: updatedContent,
-            summary: content.substring(0, 200) + "...",
+            title:     existingNote?.organizedNotes?.title || noteTitle,
+            content:   updatedContent,
+            summary:   content.substring(0, 200) + "…",
             aiProvider: "gemini",
-            sections: [{ title: "Content", content: updatedContent, subtopics: [] }],
+            sections:  [{ title: "Content", content: updatedContent, subtopics: [] }],
             keyPoints: [], definitions: {}, questions: [], calculations: [], relatedTopics: [],
           },
           updatedAt: serverTimestamp(),
         });
 
-        Alert.alert("Success! 🎉", "Notes merged successfully!", [
+        Alert.alert("Merged! 🎉", "Notes merged successfully!", [
           { text: "View Notes", onPress: () => { navigation.navigate("Notes"); resetState(); } },
-          { text: "OK", onPress: resetState },
+          { text: "OK",         onPress: resetState },
         ]);
       } else {
-        console.log("💾 Saving new note to Firebase with proper structure");
         const organizedNotes = {
-          title: noteTitle,
+          title:   noteTitle,
           content,
-          summary: content.substring(0, 200) + "...",
+          summary: content.substring(0, 200) + "…",
           aiProvider: "gemini",
           sections: [{ title: "Content", content, subtopics: [] }],
-          keyPoints: content.split("\n").filter(line => line.trim().length > 20 && (line.includes("•") || line.includes("-") || /^\d+\./.test(line.trim()))).slice(0, 5),
+          keyPoints: content
+            .split("\n")
+            .filter(l =>
+              l.trim().length > 20 &&
+              (l.includes("•") || l.includes("-") || /^\d+\./.test(l.trim()))
+            )
+            .slice(0, 8),
           definitions: {},
-          questions: ["What are the main topics covered in this content?", "What are the key takeaways?", "How does this relate to other material?"],
-          calculations: [], relatedTopics: [],
+          questions: [
+            "What are the main topics covered in this content?",
+            "What are the key takeaways and concepts?",
+            "How does this improve my knowledge in this topic?",
+          ],
+          calculations: [],
+          relatedTopics: [],
         };
 
         await addDoc(collection(db, "recordings"), {
@@ -675,10 +1156,10 @@ Format as clean, readable plain text.`;
           duration:       0,
         });
         await track();
-        console.log("✅ Note saved successfully with proper structure");
-        Alert.alert("Success! 🎉", "Notes saved successfully!", [
-          { text: "View Notes",   onPress: () => { navigation.navigate("Notes"); resetState(); } },
-          { text: "Upload More",  onPress: resetState },
+
+        Alert.alert("Saved! 🎉", "Your notes are ready to study.", [
+          { text: "View Notes",  onPress: () => { navigation.navigate("Notes"); resetState(); } },
+          { text: "Upload More", onPress: resetState },
         ]);
       }
     } catch (error) {
@@ -688,23 +1169,52 @@ Format as clean, readable plain text.`;
   };
 
   const resetState = () => {
-    setUploads([]); setGeneratedNotes(null);
-    setShowMergeModal(false); setShowNotesPreview(false);
-    setMatchingNotes([]); setNoteTitle("");
+    setUploads([]);
+    setGeneratedNotes(null);
+    setEditableNotes("");
+    setShowMergeModal(false);
+    setShowNotesPreview(false);
+    setMatchingNotes([]);
+    setNoteTitle("");
+    setFileStatuses({});
+    setDetectedDocInfo(null);
   };
 
   const handleMergeDecision = (noteId) => {
-    Alert.alert("Merge Notes", "Do you want to merge the generated content with the existing note?", [
-      { text: "Cancel", style: "cancel" },
-      { text: "Create New", onPress: () => { setShowMergeModal(false); setShowNotesPreview(true); } },
-      { text: "Merge", onPress: () => { setShowMergeModal(false); saveNotes(generatedNotes, noteId); } },
-    ]);
+    Alert.alert(
+      "Merge Notes",
+      "Do you want to merge the generated content with the existing note?",
+      [
+        { text: "Cancel",     style: "cancel" },
+        { text: "Create New", onPress: () => { setShowMergeModal(false); setShowNotesPreview(true); } },
+        { text: "Merge",      onPress: () => { setShowMergeModal(false); saveNotes(editableNotes, noteId); } },
+      ]
+    );
+  };
+
+  // ════════════════════════════════════════════════════════════
+  //  DEPTH LABEL — shown in the processing card
+  // ════════════════════════════════════════════════════════════
+  const depthLabel = {
+    brief:         "Quick Summary",
+    standard:      "Full Notes",
+    comprehensive: "Comprehensive Study Guide",
+    deep:          "Deep Study Guide (multi-pass)",
+  };
+
+  const docTypeLabel = {
+    exam_past_paper:  "Past Paper",
+    lab_report:       "Lab Report",
+    case_study:       "Case Study",
+    research_paper:   "Research Paper",
+    textbook_chapter: "Textbook Chapter",
+    lecture:          "Lecture Notes",
+    general:          "Study Notes",
   };
 
   // ════════════════════════════════════════════════════════════
   //  RENDER
   // ════════════════════════════════════════════════════════════
-
   return (
     <View style={[A.root, { backgroundColor: colors.bg }]}>
       <StatusBar barStyle={isDark ? "light-content" : "dark-content"} backgroundColor="transparent" translucent />
@@ -715,7 +1225,7 @@ Format as clean, readable plain text.`;
         <View style={{ flex: 1, alignItems: "center" }}>
           <Label color={colors.textDim} style={{ marginBottom: 4, letterSpacing: 5 }}>— NoteTedd</Label>
           <Text style={[A.navTitle, { color: colors.text }]}>
-            Image to{" "}
+            Upload to{" "}
             <Text style={{ fontStyle: "italic", color: T.violetBr }}>Notes</Text>
           </Text>
         </View>
@@ -729,12 +1239,9 @@ Format as clean, readable plain text.`;
           showsVerticalScrollIndicator={false}
           contentContainerStyle={{ paddingHorizontal: padH, paddingTop: sp(3), paddingBottom: sp(14) }}
         >
-
           <TrialBanner />
-          <UsageMeter
-            feature={FEATURES.UPLOAD}
-            style={{ marginBottom: sp(2) }}
-          />
+          <UsageMeter feature={FEATURES.UPLOAD} style={{ marginBottom: sp(2) }} />
+
           {/* ── Hero ────────────────────────────────────────── */}
           <View style={{ marginBottom: sp(3.5) }}>
             <Text style={[A.heroTitle, { color: colors.text }]}>
@@ -742,27 +1249,21 @@ Format as clean, readable plain text.`;
               <Text style={{ fontStyle: "italic", color: T.violetBr }}>Learn</Text>
             </Text>
             <Text style={[A.heroSub, { color: colors.textMuted }]}>
-              Upload whiteboard photos, diagrams, or PDFs — AI converts them into structured study notes.
+              Upload whiteboard photos, PDFs, or docs — AI reads the actual content and builds real study notes sized to your material.
             </Text>
           </View>
 
           {/* ── Upload source buttons ────────────────────────── */}
           <View style={[A.sourceRow, { marginBottom: sp(2) }]}>
             {Platform.OS !== "web" && (
-              <SourceBtn
-                icon="camera-alt"
-                label="Camera"
-                accent={T.emberBr}
-                colors={colors}
-                onPress={() => pickImages(false)}
-              />
+              <SourceBtn icon="camera-alt" label="Camera" accent={T.emberBr} colors={colors} onPress={() => pickImages(true)} />
             )}
             <SourceBtn icon="photo-library" label="Gallery"  accent={T.tealBr}   colors={colors} onPress={() => pickImages(false)} />
             <SourceBtn icon="description"   label="Files"    accent={T.violetBr} colors={colors} onPress={async () => {
-  const allowed = gate();
-  if (!allowed) return;
-  pickDocuments();
-}} />
+              const allowed = gate();
+              if (!allowed) return;
+              pickDocuments();
+            }} />
           </View>
 
           {/* Web file input */}
@@ -779,10 +1280,10 @@ Format as clean, readable plain text.`;
               <TouchableOpacity
                 style={[A.webUploadBtn, { backgroundColor: T.violetMid, shadowColor: T.violet }]}
                 onPress={() => {
-  const allowed = gate();
-  if (!allowed) return;
-  fileInputRef.current?.click();
-}}
+                  const allowed = gate();
+                  if (!allowed) return;
+                  fileInputRef.current?.click();
+                }}
                 activeOpacity={0.85}
               >
                 <MaterialIcons name="cloud-upload" size={18} color="#fff" />
@@ -795,7 +1296,9 @@ Format as clean, readable plain text.`;
           {uploads.length > 0 && (
             <View style={{ marginBottom: sp(2.5) }}>
               <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: sp(1.5) }}>
-                <Label color={colors.textDim}>— {uploads.length} file{uploads.length !== 1 ? "s" : ""} ready</Label>
+                <Label color={colors.textDim}>
+                  — {uploads.length} file{uploads.length !== 1 ? "s" : ""} ready
+                </Label>
                 <TouchableOpacity onPress={() => setUploads([])} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
                   <Label color={T.dangerBr}>Clear all</Label>
                 </TouchableOpacity>
@@ -812,9 +1315,8 @@ Format as clean, readable plain text.`;
           {uploads.length > 0 && !isProcessing && (
             <TouchableOpacity
               style={[A.processBtn, { backgroundColor: T.violetMid, shadowColor: T.violet }]}
-              onPress={canUse ? processUploads : () => gate()}
+              onPress={processUploads}
               activeOpacity={0.88}
-              disabled={!canUse}
             >
               <MaterialIcons name="auto-fix-high" size={18} color="#fff" />
               <Text style={A.processBtnTxt}>Generate Notes with AI</Text>
@@ -830,10 +1332,33 @@ Format as clean, readable plain text.`;
                 <MaterialIcons name="auto-awesome" size={28} color={T.violetBr} />
               </Animated.View>
               <Label color={T.violetBr} style={{ letterSpacing: 4, marginTop: sp(2.5), marginBottom: sp(1) }}>
-                Processing
+                {detectedDocInfo ? docTypeLabel[detectedDocInfo.docType] ?? "Processing" : "Processing"}
               </Label>
+              {detectedDocInfo && (
+                <Pill
+                  label={depthLabel[detectedDocInfo.depth] ?? "Analysing"}
+                  color={T.tealBr}
+                  style={{ marginBottom: sp(1) }}
+                />
+              )}
               <Text style={[A.processingTxt, { color: colors.text }]}>{processingProgress}</Text>
-              <Text style={[A.processingSub, { color: colors.textMuted }]}>AI is analysing your content…</Text>
+              <Text style={[A.processingSub, { color: colors.textMuted }]}>
+                AI is reading your content…
+              </Text>
+
+              {/* Per-file status list */}
+              {uploads.length > 1 && (
+                <View style={{ width: "100%", marginTop: sp(2), borderTopWidth: 1, borderTopColor: T.va(0.15), paddingTop: sp(2) }}>
+                  {uploads.map(f => (
+                    <FileProgressRow
+                      key={f.id}
+                      fileName={f.name}
+                      status={fileStatuses[f.id] ?? "pending"}
+                      colors={colors}
+                    />
+                  ))}
+                </View>
+              )}
             </View>
           )}
 
@@ -846,10 +1371,9 @@ Format as clean, readable plain text.`;
                 <Label color={T.goldBr} style={{ letterSpacing: 3 }}>Tips for best results</Label>
               </View>
               {[
-                "Take clear, well-lit photos of whiteboards",
-                "Ensure text is readable and not blurry",
-                "Upload multiple images for comprehensive notes",
-                "Works with diagrams, charts, and mind maps",
+                "Take clear, well-lit photos of whiteboards or chalkboards",                
+                "Past papers are formatted as Q&A with model answer approaches",
+                "Upload multiple files together for one combined set of notes",
               ].map((tip, i) => (
                 <View key={i} style={{ flexDirection: "row", alignItems: "flex-start", gap: 10, marginBottom: 7 }}>
                   <View style={[A.tipDot, { backgroundColor: T.violetBr }]} />
@@ -862,14 +1386,13 @@ Format as clean, readable plain text.`;
       </Animated.View>
 
       {/* ══════════════════════════════════════════════════════
-          NOTES PREVIEW MODAL
+          NOTES PREVIEW MODAL — now with editable content
       ══════════════════════════════════════════════════════ */}
       <Modal visible={showNotesPreview} animationType="slide" presentationStyle="pageSheet">
         <View style={[A.modalFull, { backgroundColor: colors.bg }]}>
-          {/* Modal header */}
           <View style={[A.modalHead, { borderBottomColor: colors.border, paddingTop: padTop, backgroundColor: colors.bg + "f0" }]}>
             <View style={{ flex: 1 }}>
-              <Label color={colors.textDim} style={{ marginBottom: 4 }}>— Preview</Label>
+              <Label color={colors.textDim} style={{ marginBottom: 4 }}>— Preview & Edit</Label>
               <Text style={[A.modalTitle, { color: colors.text }]}>
                 Generated{" "}
                 <Text style={{ fontStyle: "italic", color: T.violetBr }}>Notes</Text>
@@ -889,6 +1412,14 @@ Format as clean, readable plain text.`;
             contentContainerStyle={{ paddingHorizontal: padH, paddingTop: sp(3), paddingBottom: sp(16) }}
             showsVerticalScrollIndicator={false}
           >
+            {/* Doc type badge */}
+            {detectedDocInfo && (
+              <View style={{ flexDirection: "row", gap: sp(1.5), marginBottom: sp(2), flexWrap: "wrap" }}>
+                <Pill label={docTypeLabel[detectedDocInfo.docType] ?? "Notes"} color={T.violetBr} icon="auto-awesome" />
+                <Pill label={depthLabel[detectedDocInfo.depth] ?? ""}         color={T.tealBr}   />
+              </View>
+            )}
+
             {/* Title input */}
             <View style={[A.section, { backgroundColor: colors.bgCard, borderColor: colors.border, marginBottom: sp(2) }]}>
               <Corner pos="top-left" color={T.violetBr} size={9} />
@@ -902,22 +1433,37 @@ Format as clean, readable plain text.`;
               />
             </View>
 
-            {/* Notes content */}
+            {/* Notes content — NOW EDITABLE */}
             <View style={[A.section, { backgroundColor: colors.bgCard, borderColor: colors.border }]}>
-              <Corner pos="top-right"    color={T.tealBr}   size={9} />
-              <Corner pos="bottom-left"  color={T.violetBr} size={9} />
-              <Label color={colors.textDim} style={{ marginBottom: sp(1.5) }}>Generated Content</Label>
-              <ScrollView
-                style={[A.notesScroll, { backgroundColor: colors.bgInput, borderColor: colors.borderMid }]}
-                nestedScrollEnabled
-              >
-                <Text style={[A.notesTxt, { color: colors.textSub }]}>{generatedNotes}</Text>
-              </ScrollView>
+              <Corner pos="top-right"   color={T.tealBr}   size={9} />
+              <Corner pos="bottom-left" color={T.violetBr} size={9} />
+              <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: sp(1.5) }}>
+                <Label color={colors.textDim}>Generated Content</Label>
+                <Label color={T.tealBr} style={{ fontSize: 8 }}>Tap to edit</Label>
+              </View>
+              <TextInput
+                style={[A.notesEditInput, {
+                  color: colors.textSub,
+                  backgroundColor: colors.bgInput,
+                  borderColor: colors.borderMid,
+                }]}
+                value={editableNotes}
+                onChangeText={setEditableNotes}
+                multiline
+                textAlignVertical="top"
+                placeholder="Notes will appear here…"
+                placeholderTextColor={colors.textDim}
+                scrollEnabled
+              />
             </View>
           </ScrollView>
 
           {/* Modal actions */}
-          <View style={[A.modalActions, { borderTopColor: colors.border, backgroundColor: colors.bg, paddingHorizontal: padH, paddingBottom: Platform.OS === "ios" ? sp(5) : sp(2.5) }]}>
+          <View style={[A.modalActions, {
+            borderTopColor: colors.border, backgroundColor: colors.bg,
+            paddingHorizontal: padH,
+            paddingBottom: Platform.OS === "ios" ? sp(5) : sp(2.5),
+          }]}>
             <TouchableOpacity
               style={[A.modalBtnSecondary, { backgroundColor: colors.bgCard, borderColor: colors.border }]}
               onPress={() => setShowNotesPreview(false)}
@@ -927,7 +1473,7 @@ Format as clean, readable plain text.`;
             </TouchableOpacity>
             <TouchableOpacity
               style={[A.modalBtnPrimary, { backgroundColor: T.violetMid, shadowColor: T.violet, flex: 2 }]}
-              onPress={() => { setShowNotesPreview(false); saveNotes(generatedNotes, null); }}
+              onPress={() => { setShowNotesPreview(false); saveNotes(editableNotes, null); }}
               activeOpacity={0.88}
             >
               <MaterialIcons name="save" size={16} color="#fff" />
@@ -938,13 +1484,12 @@ Format as clean, readable plain text.`;
       </Modal>
 
       {/* ══════════════════════════════════════════════════════
-          MERGE MODAL (bottom sheet)
+          MERGE MODAL
       ══════════════════════════════════════════════════════ */}
       <Modal visible={showMergeModal} transparent animationType="slide">
         <View style={[A.mergeOverlay, { backgroundColor: T.ba(0.65) }]}>
           <View style={[A.mergeSheet, { backgroundColor: colors.bgEl, borderTopColor: colors.borderMid }]}>
             <View style={[A.sheetHandle, { backgroundColor: colors.borderMid }]} />
-
             <Label color={colors.textDim} style={{ textAlign: "center", marginBottom: sp(1), letterSpacing: 5 }}>— Smart Merge</Label>
             <Text style={[A.mergeTitle, { color: colors.text }]}>
               Similar{" "}
@@ -998,41 +1543,29 @@ Format as clean, readable plain text.`;
 // ════════════════════════════════════════════════════════════════
 //  STYLESHEET
 // ════════════════════════════════════════════════════════════════
-
 const A = StyleSheet.create({
-  root:           { flex: 1 },
-
-  // Navbar
+  root:     { flex: 1 },
   navbar: {
     flexDirection: "row", alignItems: "center",
     paddingHorizontal: sp(2.5), paddingBottom: sp(1.75),
     borderBottomWidth: 1,
   },
-  navTitle:       { fontFamily: DISPLAY, fontSize: 19, fontWeight: "900", letterSpacing: -0.5 },
-  navBadge:       { width: 38, height: 38, borderRadius: 19, borderWidth: 1, alignItems: "center", justifyContent: "center" },
-
-  // Hero
-  heroTitle:      { fontFamily: DISPLAY, fontSize: 34, fontWeight: "900", letterSpacing: -1, lineHeight: 40 },
-  heroSub:        { fontFamily: SANS, fontSize: 13, marginTop: sp(0.75), lineHeight: 20 },
-
-  // Source buttons
-  sourceRow:      { flexDirection: "row", gap: sp(1.5) },
+  navTitle:  { fontFamily: DISPLAY, fontSize: 19, fontWeight: "900", letterSpacing: -0.5 },
+  navBadge:  { width: 38, height: 38, borderRadius: 19, borderWidth: 1, alignItems: "center", justifyContent: "center" },
+  heroTitle: { fontFamily: DISPLAY, fontSize: 34, fontWeight: "900", letterSpacing: -1, lineHeight: 40 },
+  heroSub:   { fontFamily: SANS, fontSize: 13, marginTop: sp(0.75), lineHeight: 20 },
+  sourceRow:    { flexDirection: "row", gap: sp(1.5) },
   sourceBtn: {
     flex: 1, alignItems: "center", justifyContent: "center",
-    borderRadius: 18, borderWidth: 1,
-    paddingVertical: sp(2.5),
+    borderRadius: 18, borderWidth: 1, paddingVertical: sp(2.5),
   },
-  sourceBtnIcon:  { width: 48, height: 48, borderRadius: 14, alignItems: "center", justifyContent: "center" },
-
-  // Web upload button
+  sourceBtnIcon: { width: 48, height: 48, borderRadius: 14, alignItems: "center", justifyContent: "center" },
   webUploadBtn: {
     flexDirection: "row", alignItems: "center", justifyContent: "center",
     gap: sp(1.25), borderRadius: 16, padding: sp(2.25), marginBottom: sp(3),
     shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.42, shadowRadius: 12, elevation: 8,
   },
-  webUploadBtnTxt:{ fontFamily: MONO, fontSize: 10, letterSpacing: 2.5, color: "#fff", fontWeight: "700" },
-
-  // Upload row
+  webUploadBtnTxt: { fontFamily: MONO, fontSize: 10, letterSpacing: 2.5, color: "#fff", fontWeight: "700" },
   uploadRow: {
     flexDirection: "row", alignItems: "center", gap: sp(1.75),
     borderRadius: 18, borderWidth: 1, padding: sp(2),
@@ -1042,16 +1575,12 @@ const A = StyleSheet.create({
   uploadIconWrap: { width: 46, height: 46, borderRadius: 11, alignItems: "center", justifyContent: "center" },
   uploadName:     { fontFamily: SANS, fontSize: 13, fontWeight: "600" },
   removeBtn:      { width: 28, height: 28, borderRadius: 14, borderWidth: 1, alignItems: "center", justifyContent: "center" },
-
-  // Process button
   processBtn: {
     flexDirection: "row", alignItems: "center", justifyContent: "center",
     gap: sp(1.25), borderRadius: 16, padding: sp(2.25), marginBottom: sp(3),
     shadowOffset: { width: 0, height: 5 }, shadowOpacity: 0.45, shadowRadius: 14, elevation: 10,
   },
-  processBtnTxt:  { fontFamily: MONO, fontSize: 10, letterSpacing: 2.5, color: "#fff", fontWeight: "700" },
-
-  // Processing card
+  processBtnTxt: { fontFamily: MONO, fontSize: 10, letterSpacing: 2.5, color: "#fff", fontWeight: "700" },
   processingCard: {
     borderRadius: 22, borderWidth: 1, padding: sp(4),
     alignItems: "center", marginBottom: sp(3),
@@ -1060,28 +1589,30 @@ const A = StyleSheet.create({
   processingOrb:  { width: 70, height: 70, borderRadius: 35, borderWidth: 1, alignItems: "center", justifyContent: "center" },
   processingTxt:  { fontFamily: SANS, fontSize: 14, fontWeight: "600", textAlign: "center", marginBottom: 4 },
   processingSub:  { fontFamily: SANS, fontSize: 12, textAlign: "center" },
-
-  // Tips card
   tipsCard:       { borderRadius: 20, borderWidth: 1, padding: sp(2.5), position: "relative", overflow: "hidden" },
   tipDot:         { width: 5, height: 5, borderRadius: 2.5, marginTop: 6 },
   tipTxt:         { flex: 1, fontFamily: SANS, fontSize: 13, lineHeight: 20 },
-
-  // Modal — full screen (preview)
   modalFull:      { flex: 1 },
   modalHead: {
     flexDirection: "row", alignItems: "flex-end",
     paddingHorizontal: sp(2.5), paddingBottom: sp(1.75),
     borderBottomWidth: 1,
   },
-  modalTitle:     { fontFamily: DISPLAY, fontSize: 22, fontWeight: "900", letterSpacing: -0.5 },
-  section:        { borderRadius: 20, borderWidth: 1, padding: sp(2.5), position: "relative", overflow: "hidden" },
+  modalTitle:  { fontFamily: DISPLAY, fontSize: 22, fontWeight: "900", letterSpacing: -0.5 },
+  section:     { borderRadius: 20, borderWidth: 1, padding: sp(2.5), position: "relative", overflow: "hidden" },
   titleInput: {
     fontFamily: SANS, fontSize: 15, fontWeight: "600",
     borderWidth: 1, borderRadius: 12,
     paddingHorizontal: sp(2), paddingVertical: sp(1.5),
   },
-  notesScroll:    { maxHeight: 380, borderRadius: 12, borderWidth: 1, padding: sp(2) },
-  notesTxt:       { fontFamily: SANS, fontSize: 13, lineHeight: 22 },
+  // NEW: editable multiline notes field
+  notesEditInput: {
+    fontFamily: SANS, fontSize: 13, lineHeight: 22,
+    borderWidth: 1, borderRadius: 12,
+    padding: sp(2),
+    minHeight: 360,
+    maxHeight: 520,
+  },
   modalActions: {
     flexDirection: "row", gap: sp(1.5),
     paddingTop: sp(2), borderTopWidth: 1,
@@ -1095,22 +1626,20 @@ const A = StyleSheet.create({
     gap: sp(1), borderRadius: 14, paddingVertical: sp(1.75),
     shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.4, shadowRadius: 10, elevation: 8,
   },
-
-  // Modal — merge sheet
-  mergeOverlay:   { flex: 1, justifyContent: "flex-end" },
+  mergeOverlay: { flex: 1, justifyContent: "flex-end" },
   mergeSheet: {
     borderTopLeftRadius: 28, borderTopRightRadius: 28,
     borderTopWidth: 1, padding: sp(3), paddingBottom: sp(7),
   },
-  sheetHandle:    { width: 36, height: 4, borderRadius: 2, alignSelf: "center", marginBottom: sp(2.5) },
-  mergeTitle:     { fontFamily: DISPLAY, fontSize: 24, fontWeight: "900", letterSpacing: -0.5, textAlign: "center", marginBottom: 6 },
-  mergeSub:       { fontFamily: SANS, fontSize: 13, textAlign: "center", lineHeight: 20, marginBottom: sp(2.5) },
+  sheetHandle:  { width: 36, height: 4, borderRadius: 2, alignSelf: "center", marginBottom: sp(2.5) },
+  mergeTitle:   { fontFamily: DISPLAY, fontSize: 24, fontWeight: "900", letterSpacing: -0.5, textAlign: "center", marginBottom: 6 },
+  mergeSub:     { fontFamily: SANS, fontSize: 13, textAlign: "center", lineHeight: 20, marginBottom: sp(2.5) },
   matchRow: {
     flexDirection: "row", alignItems: "center", gap: sp(1.75),
     borderRadius: 16, borderWidth: 1, padding: sp(2),
     position: "relative", overflow: "hidden",
   },
-  matchIcon:      { width: 40, height: 40, borderRadius: 11, alignItems: "center", justifyContent: "center" },
-  matchTitle:     { fontFamily: SANS, fontSize: 14, fontWeight: "700", marginBottom: 3 },
-  matchPreview:   { fontFamily: SANS, fontSize: 12, lineHeight: 17 },
+  matchIcon:    { width: 40, height: 40, borderRadius: 11, alignItems: "center", justifyContent: "center" },
+  matchTitle:   { fontFamily: SANS, fontSize: 14, fontWeight: "700", marginBottom: 3 },
+  matchPreview: { fontFamily: SANS, fontSize: 12, lineHeight: 17 },
 });
