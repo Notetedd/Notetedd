@@ -6,28 +6,12 @@
     "orientation": "portrait",
     "icon": "./public/notetedd-icon-1024.png",
     "scheme": "com.notetedd.app",
-      "intentFilters": [
-        {
-          "action": "VIEW",
-          "autoVerify": true,
-          "data": [
-            {
-              "scheme": "com.notetedd.app",
-              "host": "oauth2redirect",
-              "pathPrefix": "/google"
-            }
-          ],
-          "category": [
-            "BROWSABLE",
-            "DEFAULT"
-          ]
-        }
-      ],
+
     "userInterfaceStyle": "automatic",
-    "newArchEnabled": true,
+    // "newArchEnabled": true,
     "ios": {
       "infoPlist": {
-        "UIBackgroundModes": ["audio"],      
+        "UIBackgroundModes": ["audio"],
         "NSMicrophoneUsageDescription": "Notetedd needs microphone access to enable voice commands with Tedd, your AI study assistant.",
         "NSSpeechRecognitionUsageDescription": "Notetedd uses speech recognition to understand your voice commands.",
         "supportsTablet": true,
@@ -48,32 +32,41 @@
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./public/notetedd-icon-light-512px.png"
       },
-      "edgeToEdgeEnabled": true,
+      // "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
       "permissions": [
         "android.permission.CAMERA",
         "android.permission.RECORD_AUDIO",
-         "RECORD_AUDIO",
-      "FOREGROUND_SERVICE",
-      "FOREGROUND_SERVICE_MICROPHONE",
+        "RECORD_AUDIO",
+        "FOREGROUND_SERVICE",
+        "FOREGROUND_SERVICE_MICROPHONE",
         "android.permission.MODIFY_AUDIO_SETTINGS",
         "android.permission.INTERNET",
         "android.permission.RECEIVE_BOOT_COMPLETED",
         "android.permission.VIBRATE",
         "com.google.android.gms.permission.AD_ID",
         "android.permission.CAMERA"
-        
-        
       ],
-      "package": "com.notetedd.app"
+      "package": "com.notetedd.app",
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "autoVerify": true,
+          "data": [
+            {
+              "scheme": "com.notetedd.app",
+              "host": "oauth2redirect",
+              "pathPrefix": "/google"
+            }
+          ],
+          "category": ["BROWSABLE", "DEFAULT"]
+        }
+      ]
     },
     "web": {
       "output": "static",
       "favicon": "./public/notetedd-icon-light-512px.png",
-      "permissions": [
-        "camera",
-        "bluetooth"
-      ]
+      "permissions": ["camera", "bluetooth"]
     },
     "plugins": [
       "expo-router",
@@ -107,13 +100,13 @@
         "expo-font",
         {
           "fonts": [
-      "node_modules/@expo/vector-icons/build/vendor/react-native-vector-icons/Fonts/MaterialIcons.ttf",
-      "node_modules/@expo/vector-icons/build/vendor/react-native-vector-icons/Fonts/MaterialCommunityIcons.ttf",
-      "node_modules/@expo/vector-icons/build/vendor/react-native-vector-icons/Fonts/Ionicons.ttf",
-      "node_modules/@expo/vector-icons/build/vendor/react-native-vector-icons/Fonts/FontAwesome.ttf",
-      "node_modules/@expo/vector-icons/build/vendor/react-native-vector-icons/Fonts/FontAwesome5_Regular.ttf",
-      "node_modules/@expo/vector-icons/build/vendor/react-native-vector-icons/Fonts/FontAwesome5_Solid.ttf"
-    ]
+            "node_modules/@expo/vector-icons/build/vendor/react-native-vector-icons/Fonts/MaterialIcons.ttf",
+            "node_modules/@expo/vector-icons/build/vendor/react-native-vector-icons/Fonts/MaterialCommunityIcons.ttf",
+            "node_modules/@expo/vector-icons/build/vendor/react-native-vector-icons/Fonts/Ionicons.ttf",
+            "node_modules/@expo/vector-icons/build/vendor/react-native-vector-icons/Fonts/FontAwesome.ttf",
+            "node_modules/@expo/vector-icons/build/vendor/react-native-vector-icons/Fonts/FontAwesome5_Regular.ttf",
+            "node_modules/@expo/vector-icons/build/vendor/react-native-vector-icons/Fonts/FontAwesome5_Solid.ttf"
+          ]
         }
       ],
       "expo-image-picker",
@@ -121,7 +114,12 @@
       "expo-build-properties",
       "expo-localization",
       "expo-tracking-transparency",
-      "expo-asset"
+      "expo-asset",
+      "expo-image",
+      "expo-splash-screen",
+      "expo-status-bar",
+      "expo-web-browser",
+      "expo-widgets"
     ],
     "experiments": {
       "typedRoutes": true,

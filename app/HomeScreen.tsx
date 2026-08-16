@@ -1,6 +1,6 @@
 import { MaterialIcons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { useFocusEffect, useNavigation } from "@react-navigation/native";
+import { useFocusEffect, useNavigation } from "expo-router/react-navigation";
 import { Audio } from "expo-av";
 import * as BackgroundFetch from "expo-background-fetch";
 import * as Notifications from "expo-notifications";

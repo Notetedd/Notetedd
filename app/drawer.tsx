@@ -1,29 +1,10 @@
-
 import React from "react";
-import { createDrawerNavigator } from "@react-navigation/drawer";
+import { Drawer } from "expo-router/drawer";
 import Sidebar from "./Sidebar";
-
-// Import Screens
-import ProfileScreen from "./ProfileScreen";
-import ExportNotesScreen from "./SyncClassroomScreen";
-import UploadPDFScreen from "./UploadPDFScreen";
-import PrintNotesScreen from "./SellNotesScreen";
-import PairedDevicesScreen from "./PairedDevicesScreen";
-import SubscriptionPlanScreen from "./SubscriptionPlanScreen";
-import PaymentMethodsScreen from "./PaymentMethodsScreen";
-import NotificationsScreen from "./NotificationsScreen";
-import DarkModeScreen from "./DarkModeScreen";
-import PrivacyScreen from "./PrivacyScreen";
-import PreferencesScreen from "./PrefferencesScreen";
-import HelpSupportScreen from "./HelpSupportScreen";
-import SyncClassroomScreen from "./SyncClassroomScreen";
-import SellNotesScreen from "./SellNotesScreen";
-
-const Drawer = createDrawerNavigator();
 
 export default function DrawerLayout() {
   return (
-    <Drawer.Navigator
+    <Drawer
       drawerContent={(props) => (
         <Sidebar
           {...props}
@@ -33,18 +14,18 @@ export default function DrawerLayout() {
       )}
       screenOptions={{ headerShown: false }}
     >
-      <Drawer.Screen name="Profile" component={ProfileScreen} />
-      <Drawer.Screen name="SyncClassroomNotes" component={SyncClassroomScreen} />
-      <Drawer.Screen name="Upload File" component={UploadPDFScreen} />
-      <Drawer.Screen name="SellNotes" component={SellNotesScreen} />
-      <Drawer.Screen name="PairedDevices" component={PairedDevicesScreen} />
-      <Drawer.Screen name="SubscriptionPlan" component={SubscriptionPlanScreen} />
-      <Drawer.Screen name="PaymentMethods" component={PaymentMethodsScreen} />
-      <Drawer.Screen name="Notifications" component={NotificationsScreen} />
-      <Drawer.Screen name="DarkMode" component={DarkModeScreen} />
-      <Drawer.Screen name="Privacy" component={PrivacyScreen} />
-      <Drawer.Screen name="Preferences" component={PreferencesScreen} />
-      <Drawer.Screen name="HelpSupport" component={HelpSupportScreen} />
-    </Drawer.Navigator>
+      <Drawer.Screen name="ProfileScreen" options={{ drawerLabel: "Profile" }} />
+      <Drawer.Screen name="SyncClassroomScreen" options={{ drawerLabel: "SyncClassroomNotes" }} />
+      <Drawer.Screen name="UploadPDFScreen" options={{ drawerLabel: "Upload File" }} />
+      <Drawer.Screen name="SellNotesScreen" options={{ drawerLabel: "SellNotes" }} />
+      <Drawer.Screen name="PairedDevicesScreen" options={{ drawerLabel: "PairedDevices" }} />
+      <Drawer.Screen name="SubscriptionPlanScreen" options={{ drawerLabel: "SubscriptionPlan" }} />
+      <Drawer.Screen name="PaymentMethodsScreen" options={{ drawerLabel: "PaymentMethods" }} />
+      <Drawer.Screen name="NotificationsScreen" options={{ drawerLabel: "Notifications" }} />
+      <Drawer.Screen name="DarkModeScreen" options={{ drawerLabel: "DarkMode" }} />
+      <Drawer.Screen name="PrivacyScreen" options={{ drawerLabel: "Privacy" }} />
+      <Drawer.Screen name="PreferencesScreen" options={{ drawerLabel: "Preferences" }} />
+      <Drawer.Screen name="HelpSupportScreen" options={{ drawerLabel: "HelpSupport" }} />
+    </Drawer>
   );
 }

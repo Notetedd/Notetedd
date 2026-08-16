@@ -3,8 +3,8 @@ import React, { Component, ReactNode, useEffect, useState } from "react";
 import { ActivityIndicator, Platform, Text, View } from "react-native";
 import Toast from "react-native-toast-message";
 
-import { NavigationContainer } from "@react-navigation/native";
-import { createStackNavigator } from "@react-navigation/stack";
+import { NavigationContainer } from "expo-router/react-navigation";
+import { Stack as JsStack } from "expo-router/js-stack";
 import { StatusBar } from "react-native";
 
 // Existing Screens
@@ -126,7 +126,6 @@ if (typeof ErrorUtils !== "undefined") {
   });
 }
 
-const Stack = createStackNavigator();
 
 // ==================== MAIN APP ====================
 export default function App() {
@@ -339,7 +338,7 @@ function AppContent() {
           },
         }}
       >
-        <Stack.Navigator
+        <JsStack
           initialRouteName="HomeScreen"
           screenOptions={{
             headerStyle: {
@@ -352,93 +351,93 @@ function AppContent() {
           }}
         >
           {/* ==================== EXISTING SCREENS ==================== */}
-          <Stack.Screen
+          <JsStack.Screen
             name="HomeScreen"
             component={HomeScreen}
             options={{ headerShown: false }}
           />
-          <Stack.Screen
+          <JsStack.Screen
             name="RecordScreen"
             component={RecordScreen}
             options={{ title: "Record" }}
           />
-          <Stack.Screen
+          <JsStack.Screen
             name="NotesScreen"
             component={NotesScreen}
             options={{ title: "Notes" }}
           />
-          <Stack.Screen
+          <JsStack.Screen
             name="ProfileScreen"
             component={ProfileScreen}
             options={{ title: "Profile" }}
           />
-          <Stack.Screen
+          <JsStack.Screen
             name="PairedDevicesScreen"
             component={PairedDevicesScreen}
             options={{ title: "Paired Devices" }}
           />
-          <Stack.Screen
+          <JsStack.Screen
             name="SubscriptionPlanScreen"
             component={SubscriptionPlanScreen}
             options={{ title: "Subscription" }}
           />
 
-          <Stack.Screen
+          <JsStack.Screen
             name="PaymentMethodsScreen"
             component={PaymentMethodsScreen}
             options={{ title: "Payment Methods" }}
           />
-          <Stack.Screen
+          <JsStack.Screen
             name="NotificationsScreen"
             component={NotificationsScreen}
             options={{ title: "Notifications" }}
           />
-          <Stack.Screen
+          <JsStack.Screen
             name="HelpSupportScreen"
             component={HelpSupportScreen}
             options={{ title: "Help & Support" }}
           />
-          <Stack.Screen
+          <JsStack.Screen
             name="SellNotesScreen"
             component={SellNotesScreen}
             options={{ title: "Sell Notes" }}
           />
-          <Stack.Screen
+          <JsStack.Screen
             name="SyncClassroomScreen"
             component={SyncClassroomScreen}
             options={{ title: "Sync Classroom" }}
           />
-          <Stack.Screen
+          <JsStack.Screen
             name="PrivacyScreen"
             component={PrivacyScreen}
             options={{ title: "Privacy" }}
           />
-          <Stack.Screen
+          <JsStack.Screen
             name="UploadPDFScreen"
             component={UploadPDFScreen}
             options={{ title: "Upload PDF" }}
           />
-          <Stack.Screen
+          <JsStack.Screen
             name="PrefferencesScreen"
             component={PrefferencesScreen}
             options={{ title: "Preferences" }}
           />
-          <Stack.Screen
+          <JsStack.Screen
             name="DarkModeScreen"
             component={DarkModeScreen}
             options={{ title: "Dark Mode" }}
           />
-          <Stack.Screen
+          <JsStack.Screen
             name="ResetPasswordScreen"
             component={ResetPasswordScreen}
             options={{ title: "Reset Password" }}
           />
-          <Stack.Screen
+          <JsStack.Screen
             name="WidgetPreviewScreen"
             component={WidgetPreviewScreen}
             options={{ title: "Widget Preview" }}
           />
-        </Stack.Navigator>
+        </JsStack>
         <Toast />
       </NavigationContainer>
     </>

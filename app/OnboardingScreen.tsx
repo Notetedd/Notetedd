@@ -2,7 +2,7 @@ import React, { useRef, useState, useEffect } from 'react';
 import { View, Text, StyleSheet, Dimensions, TouchableOpacity, Animated, ScrollView, Platform, Linking } from 'react-native';
 // import { router } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation } from "expo-router/react-navigation";
 
 
 const { width, height } = Dimensions.get('window');

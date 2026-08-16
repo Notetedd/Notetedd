@@ -91,7 +91,7 @@
 // ────────────────────────────────────────────────────────────────────────────
 
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { useNavigation } from "@react-navigation/native";
+import { useNavigation } from "expo-router/react-navigation";
 import { Audio } from "expo-av";
 import * as FileSystem from "expo-file-system/legacy";
 import NetInfo from "@react-native-community/netinfo";
